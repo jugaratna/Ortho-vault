@@ -41,6 +41,15 @@ function timeAgo(iso?: string | null): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
+const IDLE_THRESHOLD_DAYS = 30;
+function isIdle(iso?: string | null): boolean {
+  if (!iso) return true; // never signed in / never active
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return false;
+  const days = (Date.now() - then) / (1000 * 60 * 60 * 24);
+  return days >= IDLE_THRESHOLD_DAYS;
+}
+
 function inviteLink(): string {
   // Prefer the current runtime origin (works on web), else the configured backend URL host
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
@@ -73,11 +82,14 @@ export default function Team() {
 
   // Invite modal state
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteMode, setInviteMode] = useState<'single' | 'bulk'>('single');
   const [inviteEmail, setInviteEmail] = useState('');
+  const [bulkEmails, setBulkEmails] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('editor');
   const [inviteSending, setInviteSending] = useState(false);
   const [inviteErr, setInviteErr] = useState('');
-  const [lastInvited, setLastInvited] = useState<Invite | null>(null);
+  const [lastInvited, setLastInvited] = useState<{ email: string; role: Role; emailed?: boolean } | null>(null);
+  const [bulkResult, setBulkResult] = useState<{ invited: number; updated: number; invalid: string[]; emailed: number } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -132,13 +144,47 @@ export default function Team() {
     setInviteSending(true);
     try {
       const inv = await api.createInvite(email, inviteRole);
-      setLastInvited(inv);
+      setLastInvited({ email: inv.email, role: inv.role as Role, emailed: inv.emailed });
       setInviteEmail('');
-      // Refresh invites & users (if the address already existed as a user, role would flip)
       await load();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
       setInviteErr(e?.message || 'Could not create invite');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const sendBulkInvite = async () => {
+    setInviteErr('');
+    // Parse emails from newlines, commas, semicolons, or spaces
+    const emails = bulkEmails
+      .split(/[\s,;]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) {
+      setInviteErr('Paste at least one email address');
+      return;
+    }
+    if (emails.length > 100) {
+      setInviteErr('Please limit to 100 emails per bulk invite');
+      return;
+    }
+    setInviteSending(true);
+    try {
+      const res = await api.bulkInvite(emails, inviteRole);
+      setBulkResult({
+        invited: res.invited.length,
+        updated: res.updated.length,
+        invalid: res.invalid,
+        emailed: res.emailed,
+      });
+      setBulkEmails('');
+      await load();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      setInviteErr(e?.message || 'Bulk invite failed');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setInviteSending(false);
@@ -178,9 +224,12 @@ export default function Team() {
   const closeInvite = () => {
     setInviteOpen(false);
     setInviteEmail('');
+    setBulkEmails('');
     setInviteErr('');
     setLastInvited(null);
+    setBulkResult(null);
     setInviteRole('editor');
+    setInviteMode('single');
   };
 
   return (
@@ -281,6 +330,12 @@ export default function Team() {
                     Active {timeAgo(u.last_active)}
                   </Text>
                 </View>
+                {isIdle(u.last_active) && !self && (
+                  <View style={[styles.idleBadge, { backgroundColor: colors.warning + '22', borderColor: colors.warning }]} testID={`idle-${u.user_id}`}>
+                    <Ionicons name="moon-outline" size={10} color={colors.warning} />
+                    <Text style={{ color: colors.warning, fontSize: 10, fontWeight: '800' }}>IDLE</Text>
+                  </View>
+                )}
                 <View style={[styles.rolePill, { backgroundColor: u.role === 'admin' ? colors.brandPrimary : colors.surfaceTertiary, borderColor: u.role === 'admin' ? colors.brandPrimary : colors.border }]}>
                   <Ionicons name={meta.icon} size={12} color={u.role === 'admin' ? colors.onBrandPrimary : colors.onSurface} />
                   <Text style={{ color: u.role === 'admin' ? colors.onBrandPrimary : colors.onSurface, fontSize: 11, fontWeight: '700' }}>{meta.label}</Text>
@@ -343,12 +398,14 @@ export default function Team() {
             <View style={styles.modalHead}>
               <View style={{ flex: 1, paddingRight: 12 }}>
                 <Text style={[styles.modalTitle, { color: colors.onSurface }]}>
-                  {lastInvited ? 'Invite ready' : 'Invite colleague'}
+                  {lastInvited ? 'Invite ready' : bulkResult ? 'Bulk invite done' : 'Invite colleagues'}
                 </Text>
                 <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>
                   {lastInvited
-                    ? 'Share the link below. They must sign in with Google using the invited email.'
-                    : 'Pre-authorize an email so they get the right role on first Google sign-in.'}
+                    ? 'They\'ll get an email with the sign-in link. You can also share it manually.'
+                    : bulkResult
+                    ? 'Everyone below has been pre-authorized on their next Google sign-in.'
+                    : 'Pre-authorize colleagues so they get the right role on first Google sign-in.'}
                 </Text>
               </View>
               <Pressable testID="invite-modal-close" onPress={closeInvite}>
@@ -356,21 +413,66 @@ export default function Team() {
               </Pressable>
             </View>
 
-            {!lastInvited ? (
+            {!lastInvited && !bulkResult && (
+              <View style={[styles.tabRow, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                {(['single', 'bulk'] as const).map((m) => {
+                  const active = inviteMode === m;
+                  return (
+                    <Pressable
+                      key={m}
+                      testID={`invite-tab-${m}`}
+                      onPress={() => { setInviteMode(m); setInviteErr(''); Haptics.selectionAsync(); }}
+                      style={[styles.tab, active && { backgroundColor: colors.brandPrimary }]}
+                    >
+                      <Ionicons name={m === 'single' ? 'person-outline' : 'people-outline'} size={14} color={active ? colors.onBrandPrimary : colors.onSurface} />
+                      <Text style={{ color: active ? colors.onBrandPrimary : colors.onSurface, fontWeight: '700', fontSize: 13 }}>
+                        {m === 'single' ? 'Single' : 'Bulk paste'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {!lastInvited && !bulkResult ? (
               <>
-                <Text style={[styles.inputLabel, { color: colors.muted }]}>Email</Text>
-                <TextInput
-                  testID="invite-email-input"
-                  value={inviteEmail}
-                  onChangeText={setInviteEmail}
-                  placeholder="colleague@hospital.com"
-                  placeholderTextColor={colors.muted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!inviteSending}
-                  style={[styles.input, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, color: colors.onSurface }]}
-                />
+                {inviteMode === 'single' ? (
+                  <>
+                    <Text style={[styles.inputLabel, { color: colors.muted }]}>Email</Text>
+                    <TextInput
+                      testID="invite-email-input"
+                      value={inviteEmail}
+                      onChangeText={setInviteEmail}
+                      placeholder="colleague@hospital.com"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!inviteSending}
+                      style={[styles.input, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, color: colors.onSurface }]}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.inputLabel, { color: colors.muted }]}>Emails</Text>
+                    <TextInput
+                      testID="invite-bulk-input"
+                      value={bulkEmails}
+                      onChangeText={setBulkEmails}
+                      placeholder={"Paste one email per line, or separate with commas.\ne.g.\ndr.smith@hospital.com\ndr.patel@hospital.com"}
+                      placeholderTextColor={colors.muted}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      multiline
+                      editable={!inviteSending}
+                      style={[styles.input, styles.textarea, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, color: colors.onSurface }]}
+                    />
+                    <Text style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>
+                      Up to 100 emails per bulk invite. Duplicates &amp; existing team members are skipped.
+                    </Text>
+                  </>
+                )}
 
                 <Text style={[styles.inputLabel, { color: colors.muted, marginTop: spacing.md }]}>Role on join</Text>
                 <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
@@ -407,7 +509,7 @@ export default function Team() {
 
                 <Pressable
                   testID="invite-send-btn"
-                  onPress={sendInvite}
+                  onPress={inviteMode === 'single' ? sendInvite : sendBulkInvite}
                   disabled={inviteSending}
                   style={({ pressed }) => [styles.primaryBtn, { backgroundColor: pressed ? colors.brandSecondary : colors.brandPrimary, opacity: inviteSending ? 0.6 : 1, marginTop: spacing.lg }]}
                 >
@@ -415,11 +517,13 @@ export default function Team() {
                     ? <ActivityIndicator color={colors.onBrandPrimary} />
                     : <>
                       <Ionicons name="paper-plane-outline" size={16} color={colors.onBrandPrimary} />
-                      <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 15 }}>Create invite</Text>
+                      <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 15 }}>
+                        {inviteMode === 'single' ? 'Send invite' : 'Send bulk invites'}
+                      </Text>
                     </>}
                 </Pressable>
               </>
-            ) : (
+            ) : lastInvited ? (
               <>
                 <View style={[styles.successCard, { backgroundColor: colors.success + '15', borderColor: colors.success + '55' }]}>
                   <Ionicons name="checkmark-circle" size={22} color={colors.success} />
@@ -429,7 +533,16 @@ export default function Team() {
                   </View>
                 </View>
 
-                <Text style={[styles.inputLabel, { color: colors.muted, marginTop: spacing.md }]}>Invite link</Text>
+                <View style={[styles.emailStatus, { backgroundColor: (lastInvited.emailed ? colors.success : colors.warning) + '15', borderColor: (lastInvited.emailed ? colors.success : colors.warning) + '55' }]}>
+                  <Ionicons name={lastInvited.emailed ? 'mail' : 'mail-unread-outline'} size={16} color={lastInvited.emailed ? colors.success : colors.warning} />
+                  <Text style={{ color: colors.onSurface, fontSize: 12, flex: 1 }}>
+                    {lastInvited.emailed
+                      ? 'Invite email sent to their inbox.'
+                      : "Couldn't send the email automatically — share the link below manually."}
+                  </Text>
+                </View>
+
+                <Text style={[styles.inputLabel, { color: colors.muted, marginTop: spacing.md }]}>Sign-in link</Text>
                 <View style={[styles.linkBox, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
                   <Text selectable numberOfLines={2} style={{ color: colors.onSurface, fontSize: 13, flex: 1 }}>{link}</Text>
                 </View>
@@ -445,14 +558,61 @@ export default function Team() {
 
                 <Pressable
                   testID="invite-another-btn"
-                  onPress={() => { setLastInvited(null); }}
+                  onPress={() => { setLastInvited(null); setBulkResult(null); }}
                   style={({ pressed }) => [styles.ghostBtn, { borderColor: colors.border, backgroundColor: pressed ? colors.surfaceTertiary : 'transparent', marginTop: spacing.sm }]}
                 >
                   <Ionicons name="person-add-outline" size={16} color={colors.onSurface} />
                   <Text style={{ color: colors.onSurface, fontWeight: '600', fontSize: 14 }}>Invite another</Text>
                 </Pressable>
               </>
-            )}
+            ) : bulkResult ? (
+              <>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
+                  <View style={[styles.statCard, { backgroundColor: colors.brandTertiary, borderColor: colors.brand + '33' }]}>
+                    <Text style={{ color: colors.brand, fontSize: 22, fontWeight: '800' }}>{bulkResult.invited}</Text>
+                    <Text style={{ color: colors.onSurface, fontSize: 11, fontWeight: '600' }}>Invited</Text>
+                  </View>
+                  <View style={[styles.statCard, { backgroundColor: colors.success + '15', borderColor: colors.success + '55' }]}>
+                    <Text style={{ color: colors.success, fontSize: 22, fontWeight: '800' }}>{bulkResult.emailed}</Text>
+                    <Text style={{ color: colors.onSurface, fontSize: 11, fontWeight: '600' }}>Emailed</Text>
+                  </View>
+                  {bulkResult.updated > 0 && (
+                    <View style={[styles.statCard, { backgroundColor: colors.warning + '15', borderColor: colors.warning + '55' }]}>
+                      <Text style={{ color: colors.warning, fontSize: 22, fontWeight: '800' }}>{bulkResult.updated}</Text>
+                      <Text style={{ color: colors.onSurface, fontSize: 11, fontWeight: '600' }}>Updated</Text>
+                    </View>
+                  )}
+                </View>
+
+                {bulkResult.invalid.length > 0 && (
+                  <View style={[styles.errBanner, { backgroundColor: colors.error + '15', borderColor: colors.error + '55', marginBottom: spacing.md, alignItems: 'flex-start' }]}>
+                    <Ionicons name="alert-circle" size={16} color={colors.error} style={{ marginTop: 2 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.error, fontSize: 12, fontWeight: '700' }}>{bulkResult.invalid.length} invalid skipped</Text>
+                      <Text style={{ color: colors.error, fontSize: 11, marginTop: 2 }} numberOfLines={3}>{bulkResult.invalid.join(', ')}</Text>
+                    </View>
+                  </View>
+                )}
+
+                <Pressable
+                  testID="invite-copy-btn"
+                  onPress={copyLink}
+                  style={({ pressed }) => [styles.primaryBtn, { backgroundColor: pressed ? colors.brandSecondary : colors.brandPrimary }]}
+                >
+                  <Ionicons name="copy-outline" size={16} color={colors.onBrandPrimary} />
+                  <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 15 }}>Copy sign-in link</Text>
+                </Pressable>
+
+                <Pressable
+                  testID="invite-another-btn"
+                  onPress={() => { setBulkResult(null); setLastInvited(null); }}
+                  style={({ pressed }) => [styles.ghostBtn, { borderColor: colors.border, backgroundColor: pressed ? colors.surfaceTertiary : 'transparent', marginTop: spacing.sm }]}
+                >
+                  <Ionicons name="people-outline" size={16} color={colors.onSurface} />
+                  <Text style={{ color: colors.onSurface, fontWeight: '600', fontSize: 14 }}>Invite more</Text>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -486,4 +646,10 @@ const styles = StyleSheet.create({
   ghostBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 44, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
   successCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
   linkBox: { padding: 12, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, minHeight: 48, justifyContent: 'center' },
+  idleBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: StyleSheet.hairlineWidth, marginRight: 4 },
+  tabRow: { flexDirection: 'row', padding: 4, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.md, gap: 4 },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: radius.sm },
+  textarea: { minHeight: 100, textAlignVertical: 'top', paddingTop: 12 },
+  emailStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginTop: spacing.sm },
+  statCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, gap: 4 },
 });

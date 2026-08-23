@@ -131,7 +131,21 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ email, role }),
     });
-    return json<{ email: string; role: 'admin' | 'editor' | 'viewer'; invited_at?: string | null }>(res);
+    return json<{ email: string; role: 'admin' | 'editor' | 'viewer'; invited_at?: string | null; emailed?: boolean }>(res);
+  },
+
+  async bulkInvite(emails: string[], role: 'admin' | 'editor' | 'viewer') {
+    const res = await fetch(`${API_BASE}/auth/invites/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ emails, role }),
+    });
+    return json<{
+      invited: Array<{ email: string; role: string; invited_at?: string | null; emailed?: boolean }>;
+      updated: Array<{ email: string; role: string; invited_at?: string | null }>;
+      invalid: string[];
+      emailed: number;
+    }>(res);
   },
 
   async deleteInvite(email: string) {

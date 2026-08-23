@@ -1,6 +1,7 @@
 # OrthoVault — Product Requirements
 
-<!-- v8: Added Invite by Email + Team Activity Log. Admins can pre-authorize colleagues by email/role, copy a ready-to-share sign-in link, revoke pending invites, and see each member's "Active X ago" timestamp. Backend: /api/auth/invites (GET/POST/DELETE); /api/auth/session honors pending invites at first Google sign-in; /api/auth/users returns last_active. -->
+<!-- v9: (1) Backend split into modules: config.py, db.py, deps.py, models.py, storage.py, emailing.py, routes/{auth,patients,files,ai}.py — server.py is now a slim assembly. (2) Emergent Resend integration for invite emails: guardrail gate + server-side template + POST /api/auth/invites returns `emailed` flag. (3) Bulk invite endpoint POST /api/auth/invites/bulk (up to 100 emails, dedupes, reports invalid/updated/emailed). (4) Idle Watch: 30+ day idle members get a subtle IDLE badge on the Team screen. -->
+<!-- v8: Added Invite by Email + Team Activity Log. Admins can pre-authorize colleagues by email/role, copy a ready-to-share sign-in link, revoke pending invites, and see each member's "Active X ago" timestamp. -->
 
 
 ## Purpose
