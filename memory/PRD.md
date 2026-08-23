@@ -1,5 +1,8 @@
 # OrthoVault — Product Requirements
 
+<!-- v8: Added Invite by Email + Team Activity Log. Admins can pre-authorize colleagues by email/role, copy a ready-to-share sign-in link, revoke pending invites, and see each member's "Active X ago" timestamp. Backend: /api/auth/invites (GET/POST/DELETE); /api/auth/session honors pending invites at first Google sign-in; /api/auth/users returns last_active. -->
+
+
 ## Purpose
 OrthoVault is a HIPAA-mindful mobile app for Orthopedic Surgeons to securely store & manage patient clinical records, X-rays/scans, PDFs, DOCX reports, and clinical videos (gait, ROM, arthroscopy).
 

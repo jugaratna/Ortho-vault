@@ -108,7 +108,7 @@ export const api = {
 
   async listUsers() {
     const res = await fetch(`${API_BASE}/auth/users`, { headers: authHeaders() });
-    return json<Array<{ user_id: string; email: string; name: string; picture: string; role: 'admin' | 'editor' | 'viewer' }>>(res);
+    return json<Array<{ user_id: string; email: string; name: string; picture: string; role: 'admin' | 'editor' | 'viewer'; last_active?: string | null }>>(res);
   },
 
   async updateUserRole(user_id: string, role: 'admin' | 'editor' | 'viewer') {
@@ -116,6 +116,28 @@ export const api = {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ role }),
+    });
+    return json<{ ok: boolean }>(res);
+  },
+
+  async listInvites() {
+    const res = await fetch(`${API_BASE}/auth/invites`, { headers: authHeaders() });
+    return json<Array<{ email: string; role: 'admin' | 'editor' | 'viewer'; invited_at?: string | null }>>(res);
+  },
+
+  async createInvite(email: string, role: 'admin' | 'editor' | 'viewer') {
+    const res = await fetch(`${API_BASE}/auth/invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ email, role }),
+    });
+    return json<{ email: string; role: 'admin' | 'editor' | 'viewer'; invited_at?: string | null }>(res);
+  },
+
+  async deleteInvite(email: string) {
+    const res = await fetch(`${API_BASE}/auth/invites/${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
     });
     return json<{ ok: boolean }>(res);
   },

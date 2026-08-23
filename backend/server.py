@@ -152,6 +152,7 @@ class UserOut(BaseModel):
     name: str = ""
     picture: str = ""
     role: str = "editor"
+    last_active: Optional[str] = None
 
 
 class SessionOut(BaseModel):
@@ -179,6 +180,11 @@ async def current_user(authorization: Optional[str] = Header(None), token: Optio
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # bump last_active (fire-and-forget)
+    try:
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"last_active": datetime.now(timezone.utc)}})
+    except Exception:
+        pass
     return user
 
 
@@ -218,6 +224,11 @@ async def auth_session(payload: SessionExchange):
         # First-ever user becomes admin
         total = await db.users.count_documents({})
         role = "admin" if total == 0 else "editor"
+        # Honor pending invite (case-insensitive email match)
+        invite = await db.invites.find_one({"email": email})
+        if invite and invite.get("role") in ("admin", "editor", "viewer"):
+            role = invite["role"]
+            await db.invites.delete_one({"email": email})
         user = {
             "user_id": f"user_{uuid.uuid4().hex[:12]}",
             "email": email,
@@ -225,6 +236,7 @@ async def auth_session(payload: SessionExchange):
             "picture": picture,
             "role": role,
             "created_at": now,
+            "last_active": now,
         }
         await db.users.insert_one(dict(user))
 
@@ -270,7 +282,67 @@ async def auth_logout(authorization: Optional[str] = Header(None)):
 @api_router.get("/auth/users", response_model=List[UserOut])
 async def list_users(_=Depends(require_admin)):
     docs = await db.users.find({}, {"_id": 0}).to_list(500)
-    return [UserOut(**{k: d.get(k, '') for k in ('user_id', 'email', 'name', 'picture', 'role')}) for d in docs]
+    out = []
+    for d in docs:
+        la = d.get("last_active")
+        if isinstance(la, datetime):
+            la = la.isoformat()
+        out.append(UserOut(
+            user_id=d.get("user_id", ""),
+            email=d.get("email", ""),
+            name=d.get("name", ""),
+            picture=d.get("picture", ""),
+            role=d.get("role", "editor"),
+            last_active=la if isinstance(la, str) else None,
+        ))
+    return out
+
+
+class InviteIn(BaseModel):
+    email: str
+    role: str = "editor"
+
+
+class InviteOut(BaseModel):
+    email: str
+    role: str
+    invited_at: Optional[str] = None
+
+
+@api_router.get("/auth/invites", response_model=List[InviteOut])
+async def list_invites(_=Depends(require_admin)):
+    docs = await db.invites.find({}, {"_id": 0}).to_list(500)
+    out = []
+    for d in docs:
+        ia = d.get("invited_at")
+        if isinstance(ia, datetime):
+            ia = ia.isoformat()
+        out.append(InviteOut(email=d.get("email", ""), role=d.get("role", "editor"), invited_at=ia if isinstance(ia, str) else None))
+    return out
+
+
+@api_router.post("/auth/invites", response_model=InviteOut)
+async def create_invite(payload: InviteIn, _=Depends(require_admin)):
+    if payload.role not in ("admin", "editor", "viewer"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    email = payload.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Invalid email")
+    # If user already exists, just change their role instead of storing an invite
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        await db.users.update_one({"user_id": existing["user_id"]}, {"$set": {"role": payload.role}})
+        return InviteOut(email=email, role=payload.role, invited_at=None)
+    now = datetime.now(timezone.utc)
+    await db.invites.update_one({"email": email}, {"$set": {"email": email, "role": payload.role, "invited_at": now}}, upsert=True)
+    return InviteOut(email=email, role=payload.role, invited_at=now.isoformat())
+
+
+@api_router.delete("/auth/invites/{email}")
+async def delete_invite(email: str, _=Depends(require_admin)):
+    email = email.strip().lower()
+    await db.invites.delete_one({"email": email})
+    return {"ok": True}
 
 
 class RoleUpdate(BaseModel):
