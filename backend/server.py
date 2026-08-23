@@ -105,6 +105,7 @@ class Patient(BaseModel):
     diagnosis: str = ""
     history: str = ""
     date_of_surgery: Optional[str] = None  # ISO YYYY-MM-DD
+    followup_days: Optional[int] = None  # per-patient override (null = use global)
     result: str = ""
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []
@@ -123,6 +124,7 @@ class PatientUpsert(BaseModel):
     diagnosis: str = ""
     history: str = ""
     date_of_surgery: Optional[str] = None
+    followup_days: Optional[int] = None
     result: str = ""
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []

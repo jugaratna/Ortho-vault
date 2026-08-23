@@ -21,7 +21,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { api, fileUrl, MediaFile, Patient, Sex } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
 import { searchIcd, IcdCode } from '@/src/data/icd10';
+import { DISCHARGE_TEMPLATE } from '@/src/data/templates';
 import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
+import { useSettings } from '@/src/settings';
 
 export default function AddPatient() {
   const router = useRouter();
@@ -51,6 +53,8 @@ export default function AddPatient() {
   const [showIcd, setShowIcd] = useState(false);
   const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const { followupDays: globalFollowup } = useSettings();
+  const [followupDays, setFollowupDays] = useState<number | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -60,6 +64,7 @@ export default function AddPatient() {
         setMobile(p.mobile); setDiagnosis(p.diagnosis || ''); setHistory(p.history || '');
         setResult(p.result || '');
         setDos(p.date_of_surgery ? new Date(p.date_of_surgery) : null);
+        setFollowupDays(p.followup_days ?? null);
         setPreOp(p.pre_op || []); setPostOp(p.post_op || []); setVideos(p.videos || []);
       }).finally(() => setLoading(false));
     }
@@ -185,6 +190,7 @@ export default function AddPatient() {
         diagnosis: diagnosis.trim(),
         history,
         result,
+        followup_days: followupDays,
         date_of_surgery: dos ? dos.toISOString().slice(0, 10) : null,
         pre_op: preOp,
         post_op: postOp,
@@ -285,6 +291,30 @@ export default function AddPatient() {
               />
             )}
           </Field>
+
+          <Field label={`Follow-up Window (global default: ${globalFollowup}d)`}>
+            <View style={styles.followRow}>
+              {([
+                { v: null, label: 'Global' },
+                { v: 30, label: '30d' },
+                { v: 60, label: '60d' },
+                { v: 90, label: '90d' },
+                { v: 180, label: '180d' },
+              ] as { v: number | null; label: string }[]).map((opt) => {
+                const active = followupDays === opt.v;
+                return (
+                  <Pressable
+                    key={opt.label}
+                    testID={`followup-opt-${opt.label}`}
+                    onPress={() => setFollowupDays(opt.v)}
+                    style={[styles.followChip, { backgroundColor: active ? colors.brandPrimary : colors.surfaceSecondary, borderColor: active ? colors.brandPrimary : colors.border }]}
+                  >
+                    <Text style={{ color: active ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 13 }}>{opt.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Field>
         </Section>
 
         <MediaSection title="Pre-operative Documents" section="pre_op" files={preOp} onPickImage={() => pickImages('pre_op')} onPickDoc={() => pickDocs('pre_op')} onRemove={(fid) => removeFile('pre_op', fid)} uploading={uploading === 'pre_op'} />
@@ -300,8 +330,18 @@ export default function AddPatient() {
 
         <Section title="Result / Outcome" colors={colors}>
           <Field label="Clinical Result Notes">
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+              <Pressable
+                testID="insert-discharge-template"
+                onPress={() => { setResult((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + DISCHARGE_TEMPLATE); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                style={[styles.templateBtn, { backgroundColor: colors.brandTertiary, borderColor: colors.brand }]}
+              >
+                <Ionicons name="document-text-outline" size={14} color={colors.brand} />
+                <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Insert Discharge Template</Text>
+              </Pressable>
+            </View>
             <View style={{ position: 'relative' }}>
-              <TextInput testID="input-result" value={result} onChangeText={setResult} multiline placeholder="ROM, function scores, post-op notes — or tap the mic to dictate" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, paddingRight: 56 }]} />
+              <TextInput testID="input-result" value={result} onChangeText={setResult} multiline placeholder="ROM, function scores, post-op notes — or tap the mic to dictate" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, paddingRight: 56, minHeight: 160 }]} />
               <Pressable
                 testID="voice-note-btn"
                 onPress={voiceState === 'recording' ? stopVoice : startVoice}
@@ -458,4 +498,7 @@ const styles = StyleSheet.create({
   subHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 8 },
   subHeadText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
   subCount: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, minWidth: 22, alignItems: 'center' },
+  followRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  followChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  templateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
 });

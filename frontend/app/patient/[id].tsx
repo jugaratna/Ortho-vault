@@ -138,6 +138,7 @@ function DemographicsTab({ patient }: { patient: Patient }) {
       <InfoRow label="Mobile" value={`${patient.country_code} ${patient.mobile}`} />
       <InfoRow label="Diagnosis" value={patient.diagnosis || 'Not set'} />
       <InfoRow label="Date of Surgery" value={patient.date_of_surgery || 'Not set'} />
+      <InfoRow label="Follow-up Window" value={patient.followup_days ? `${patient.followup_days} days (custom)` : 'Using global default'} />
     </View>
   );
 }

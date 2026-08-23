@@ -28,6 +28,7 @@ export type Patient = {
   diagnosis: string;
   history: string;
   date_of_surgery?: string | null;
+  followup_days?: number | null;
   result: string;
   pre_op: MediaFile[];
   post_op: MediaFile[];

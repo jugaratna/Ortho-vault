@@ -5,10 +5,11 @@ import { Patient } from '@/src/api/client';
 // - AND no result/outcome has been recorded yet
 export const FOLLOWUP_DAYS = 42;
 
-export function isOverdue(p: Patient, days = FOLLOWUP_DAYS): boolean {
+export function isOverdue(p: Patient, globalDays: number): boolean {
   if (!p.date_of_surgery) return false;
   const dos = new Date(p.date_of_surgery);
   if (Number.isNaN(dos.getTime())) return false;
+  const days = p.followup_days && p.followup_days > 0 ? p.followup_days : globalDays;
   const diff = (Date.now() - dos.getTime()) / (1000 * 60 * 60 * 24);
   const noResult = !(p.result && p.result.trim().length > 0);
   const noPostOp = !(p.post_op && p.post_op.length > 0);
