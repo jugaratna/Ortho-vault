@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 5 – frontend verification of add-patient bug-fix bundle. All 5 primary acceptance flows PASS. (1) Unauth navigation to /add-patient is redirected to /login by RootNav in _layout.tsx. (2) Editor session renders the form normally: viewer-notice absent, all 5 upload buttons (pre_op-add-image, pre_op-add-doc, post_op-add-image, post_op-add-doc, add-video-btn) opacity=1 & no aria-disabled, mic + save present. (3) Viewer session shows yellow testID=viewer-notice with correct copy and all 5 upload buttons rendered opacity=0.5 with aria-disabled=true. (4) Backend spot-check unchanged: /api/patients returns 401 unauth and 200 for admin. (5) Token-guard and upload-failure banner code paths verified by source review at add-patient.tsx L94-96/L122-123/L146-147 (`if (!token) setUploadError('Signing you in — please try again in a moment.')`) and L110-117/L134-141/L162-169 (catch → setUploadError + Haptics.notificationAsync Error). authLoading gate confirmed at L303. Minor UX observation: because the upload Pressables use React Native `disabled={isViewer || uploading}`, the viewer-role early-return inside pickImages/pickDocs/pickVideo is not actually reachable via a tap — React Native swallows onPress on disabled Pressables. The viewer already sees the persistent viewer-notice banner so behavior is fine; but if the spec intent is that tapping the disabled button ALSO shows a transient 'Viewers cannot upload files' banner, the `disabled` prop needs to be removed or replaced with a manual guard.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Viewer tap on disabled upload button",
+        "issue": "Viewer taps on pre_op-add-image/etc. do not fire onPress because React Native Pressables have disabled={isViewer||uploading} (add-patient.tsx L442, L724, L736). The `if (isViewer) setUploadError(...)` early-return branch inside pickImages/pickDocs/pickVideo is unreachable in this path. The persistent yellow viewer-notice banner still communicates the state, so functionally acceptable, but the acceptance criterion 'their onPress handlers early-return with a friendly error banner' is only satisfied structurally, not observably.",
+        "affected_testIDs": ["pre_op-add-image", "pre_op-add-doc", "post_op-add-image", "post_op-add-doc", "add-video-btn", "upload-error-banner"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/seed_test_users.py",
+    "/app/frontend/app/add-patient.tsx"
+  ],
+  "action_items": [
+    "OPTIONAL: If tapping a disabled upload button should also flash the transient upload-error-banner for viewers, drop the `disabled` prop on those Pressables and rely solely on the in-handler guard + visual opacity styling. Currently users just see the persistent yellow viewer-notice, which is arguably clearer.",
+    "No other action items — unauth redirect, editor happy-path, viewer visual gating, authLoading spinner, token guard, and upload-error handling with haptics are all correctly implemented."
+  ],
+  "critical_code_review_comments": [
+    "add-patient.tsx L442, L724, L736 — Pressable `disabled` prop makes the in-handler viewer/`!token` guards unreachable via tap. Consider: `onPress={isViewer ? () => setUploadError('Viewers cannot upload…') : pickImages}` and drop `disabled={isViewer}` while keeping opacity for visual affordance.",
+    "add-patient.tsx L303 — early return renders a bare centered ActivityIndicator without a testID. Adding testID='auth-loading' would make the loading gate deterministically testable.",
+    "add-patient.tsx is 830 lines — approaching the 700-line advisory limit. Consider extracting MediaSection, FileGrid, SubHeading, Section, Field to /src/components/patient-form/ for maintainability.",
+    "auth/index.tsx L77-78 — silent catch in exchange(). Consider surfacing a user-visible error toast on session exchange failure so users understand why they landed back on /login."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "spot-check 100% (401 unauth, 200 admin)", "frontend": "5/5 primary flows verified"},
+  "seed_data_creation": "Re-ran /app/backend/tests/seed_test_users.py (idempotent). Tokens available: test_token_admin, test_token_editor1, test_token_editor2, test_token_viewer.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To simulate roles in the web preview: localStorage.setItem('orthovault:session_token', '<test_token_admin|editor1|viewer>') then reload. Public URL: https://surgical-vault-2.preview.emergentagent.com. Seeder at /app/backend/tests/seed_test_users.py. Key testIDs on /add-patient: viewer-notice, upload-error-banner, pre_op-add-image, pre_op-add-doc, post_op-add-image, post_op-add-doc, add-video-btn, voice-note-btn, save-patient-btn, input-name, input-age, input-mobile, input-diagnosis. authLoading gate at L303 has no testID — add if needed.",
+  "rca_of_issue": "N/A — bug-fix bundle validated. Only nuance found: React Native `disabled` on Pressable prevents onPress from firing, so the in-handler viewer guard is dead code for viewers. The viewer role is still visually and functionally locked out via `disabled + opacity 0.5 + persistent viewer-notice banner`, so user experience is correct; the redundant guard is defensive only."
+}

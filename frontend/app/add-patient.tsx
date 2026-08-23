@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, Redirect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -26,17 +26,21 @@ import { TEMPLATES, Template } from '@/src/data/templates';
 import { useCustomTemplates, CustomTemplate } from '@/src/utils/custom-templates';
 import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
 import { useSettings } from '@/src/settings';
+import { useAuth } from '@/src/auth';
 
 export default function AddPatient() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user, loading: authLoading, token } = useAuth();
 
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState<null | 'pre_op' | 'post_op' | 'video'>(null);
   const [showDate, setShowDate] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const isViewer = user?.role === 'viewer';
 
   const [name, setName] = useState('');
   const [age, setAge] = useState('');
@@ -87,11 +91,15 @@ export default function AddPatient() {
   }, [id]);
 
   const pickImages = async (section: 'pre_op' | 'post_op') => {
+    if (isViewer) { setUploadError('Viewers cannot upload files. Ask an admin to upgrade your role.'); return; }
+    if (!token) { setUploadError('Signing you in — please try again in a moment.'); return; }
+    setUploadError('');
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) { setUploadError('Photo library permission is required to attach images.'); return; }
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, quality: 0.8 });
     if (res.canceled) return;
     setUploading(section);
+    const failures: string[] = [];
     for (const asset of res.assets) {
       const name = asset.fileName || `img-${Date.now()}.jpg`;
       const mime = asset.mimeType || 'image/jpeg';
@@ -99,31 +107,51 @@ export default function AddPatient() {
         const up = await api.uploadFile(asset.uri, name, mime);
         const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
         if (section === 'pre_op') setPreOp((cur) => [...cur, mf]); else setPostOp((cur) => [...cur, mf]);
-      } catch (e) {}
+      } catch (e: any) {
+        failures.push(`${name}: ${e?.message || 'upload failed'}`);
+      }
+    }
+    if (failures.length) {
+      setUploadError(`Couldn't upload ${failures.length} file${failures.length === 1 ? '' : 's'} — ${failures[0]}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
     setUploading(null);
   };
 
   const pickDocs = async (section: 'pre_op' | 'post_op') => {
+    if (isViewer) { setUploadError('Viewers cannot upload files. Ask an admin to upgrade your role.'); return; }
+    if (!token) { setUploadError('Signing you in — please try again in a moment.'); return; }
+    setUploadError('');
     const res = await DocumentPicker.getDocumentAsync({ multiple: true, type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '*/*'], copyToCacheDirectory: true });
     if (res.canceled) return;
     setUploading(section);
+    const failures: string[] = [];
     for (const a of res.assets) {
       try {
         const up = await api.uploadFile(a.uri, a.name, a.mimeType || 'application/octet-stream');
         const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
         if (section === 'pre_op') setPreOp((cur) => [...cur, mf]); else setPostOp((cur) => [...cur, mf]);
-      } catch (e) {}
+      } catch (e: any) {
+        failures.push(`${a.name}: ${e?.message || 'upload failed'}`);
+      }
+    }
+    if (failures.length) {
+      setUploadError(`Couldn't upload ${failures.length} file${failures.length === 1 ? '' : 's'} — ${failures[0]}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
     setUploading(null);
   };
 
   const pickVideo = async () => {
+    if (isViewer) { setUploadError('Viewers cannot upload files. Ask an admin to upgrade your role.'); return; }
+    if (!token) { setUploadError('Signing you in — please try again in a moment.'); return; }
+    setUploadError('');
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) { setUploadError('Media library permission is required to attach videos.'); return; }
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], allowsMultipleSelection: true, quality: 0.8 });
     if (res.canceled) return;
     setUploading('video');
+    const failures: string[] = [];
     for (const asset of res.assets) {
       const name = asset.fileName || `vid-${Date.now()}.mp4`;
       const mime = asset.mimeType || 'video/mp4';
@@ -131,7 +159,13 @@ export default function AddPatient() {
         const up = await api.uploadFile(asset.uri, name, mime);
         const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section: 'video' };
         setVideos((cur) => [...cur, mf]);
-      } catch (e) {}
+      } catch (e: any) {
+        failures.push(`${name}: ${e?.message || 'upload failed'}`);
+      }
+    }
+    if (failures.length) {
+      setUploadError(`Couldn't upload ${failures.length} video${failures.length === 1 ? '' : 's'} — ${failures[0]}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
     setUploading(null);
   };
@@ -266,6 +300,8 @@ export default function AddPatient() {
     }
   };
 
+  if (authLoading) return <View style={[styles.center, { backgroundColor: colors.surface }]}><ActivityIndicator color={colors.brand} /></View>;
+  if (!user) return <Redirect href="/login" />;
   if (loading) return <View style={[styles.center, { backgroundColor: colors.surface }]}><ActivityIndicator color={colors.brand} /></View>;
 
   return (
@@ -279,6 +315,23 @@ export default function AddPatient() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }} keyboardShouldPersistTaps="handled">
+        {!!uploadError && (
+          <Pressable
+            testID="upload-error-banner"
+            onPress={() => setUploadError('')}
+            style={[styles.errBanner, { backgroundColor: colors.error + '22', borderColor: colors.error }]}
+          >
+            <Ionicons name="alert-circle" size={16} color={colors.error} />
+            <Text style={{ color: colors.error, fontSize: 12, flex: 1 }}>{uploadError}</Text>
+            <Ionicons name="close" size={14} color={colors.error} />
+          </Pressable>
+        )}
+        {isViewer && (
+          <View testID="viewer-notice" style={[styles.errBanner, { backgroundColor: colors.warning + '22', borderColor: colors.warning }]}>
+            <Ionicons name="eye-outline" size={16} color={colors.warning} />
+            <Text style={{ color: colors.warning, fontSize: 12, flex: 1 }}>Read-only viewer role — media uploads are disabled. Contact your admin to upgrade.</Text>
+          </View>
+        )}
         <Section title="Demographics" colors={colors}>
           <Field label="Name" error={errors.name}>
             <TextInput testID="input-name" value={name} onChangeText={setName} placeholder="John Doe" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
@@ -378,12 +431,17 @@ export default function AddPatient() {
           </Field>
         </Section>
 
-        <MediaSection title="Pre-operative Documents" section="pre_op" files={preOp} onPickImage={() => pickImages('pre_op')} onPickDoc={() => pickDocs('pre_op')} onRemove={(fid) => removeFile('pre_op', fid)} uploading={uploading === 'pre_op'} />
-        <MediaSection title="Post-operative Documents" section="post_op" files={postOp} onPickImage={() => pickImages('post_op')} onPickDoc={() => pickDocs('post_op')} onRemove={(fid) => removeFile('post_op', fid)} uploading={uploading === 'post_op'} />
+        <MediaSection title="Pre-operative Documents" section="pre_op" files={preOp} onPickImage={() => pickImages('pre_op')} onPickDoc={() => pickDocs('pre_op')} onRemove={(fid) => removeFile('pre_op', fid)} uploading={uploading === 'pre_op'} disabled={isViewer} />
+        <MediaSection title="Post-operative Documents" section="post_op" files={postOp} onPickImage={() => pickImages('post_op')} onPickDoc={() => pickDocs('post_op')} onRemove={(fid) => removeFile('post_op', fid)} uploading={uploading === 'post_op'} disabled={isViewer} />
 
         <Section title="Videos" colors={colors}>
           <SubHeading label="Videos" icon="videocam-outline" count={videos.length} />
-          <Pressable testID="add-video-btn" onPress={pickVideo} style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm }]}>
+          <Pressable
+            testID="add-video-btn"
+            onPress={pickVideo}
+            disabled={isViewer || uploading === 'video'}
+            style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm, opacity: isViewer ? 0.5 : 1 }]}
+          >
             {uploading === 'video' ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="videocam-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Add Video (Gait, ROM, Arthroscopy)</Text></>}
           </Pressable>
           {videos.length > 0 && <FileGrid files={videos} onRemove={(fid) => removeFile('video', fid)} />}
@@ -650,7 +708,7 @@ function Field({ label, error, flex, children }: any) {
   );
 }
 
-function MediaSection({ title, section, files, onPickImage, onPickDoc, onRemove, uploading }: any) {
+function MediaSection({ title, section, files, onPickImage, onPickDoc, onRemove, uploading, disabled }: any) {
   const { colors } = useTheme();
   const images = (files || []).filter((f: MediaFile) => f.kind === 'image');
   const docs = (files || []).filter((f: MediaFile) => f.kind === 'pdf' || f.kind === 'doc' || f.kind === 'dicom' || f.kind === 'other');
@@ -663,7 +721,8 @@ function MediaSection({ title, section, files, onPickImage, onPickDoc, onRemove,
       <Pressable
         testID={`${section}-add-image`}
         onPress={onPickImage}
-        style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm }]}
+        disabled={disabled || !!uploading}
+        style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm, opacity: disabled ? 0.5 : 1 }]}
       >
         {uploading ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="images-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Add Images (X-ray, MRI, CT, photos)</Text></>}
       </Pressable>
@@ -674,7 +733,8 @@ function MediaSection({ title, section, files, onPickImage, onPickDoc, onRemove,
       <Pressable
         testID={`${section}-add-doc`}
         onPress={onPickDoc}
-        style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm }]}
+        disabled={disabled || !!uploading}
+        style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm, opacity: disabled ? 0.5 : 1 }]}
       >
         <Ionicons name="document-attach-outline" size={18} color={colors.onSurface} />
         <Text style={{ color: colors.onSurface, fontWeight: '600' }}>Add PDFs / Word Docs / Lab Reports</Text>
@@ -765,4 +825,5 @@ const styles = StyleSheet.create({
   tplIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   newTplRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderStyle: 'dashed', marginBottom: spacing.md },
   groupLbl: { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: spacing.sm, marginTop: 4 },
+  errBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.md },
 });
