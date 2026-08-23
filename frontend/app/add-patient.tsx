@@ -27,6 +27,7 @@ import { useCustomTemplates, CustomTemplate } from '@/src/utils/custom-templates
 import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
 import { useSettings } from '@/src/settings';
 import { useAuth } from '@/src/auth';
+import { mkId } from '@/src/utils/id';
 
 export default function AddPatient() {
   const router = useRouter();
@@ -105,7 +106,7 @@ export default function AddPatient() {
       const mime = asset.mimeType || 'image/jpeg';
       try {
         const up = await api.uploadFile(asset.uri, name, mime);
-        const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
+        const mf: MediaFile = { id: mkId(), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
         if (section === 'pre_op') setPreOp((cur) => [...cur, mf]); else setPostOp((cur) => [...cur, mf]);
       } catch (e: any) {
         failures.push(`${name}: ${e?.message || 'upload failed'}`);
@@ -129,7 +130,7 @@ export default function AddPatient() {
     for (const a of res.assets) {
       try {
         const up = await api.uploadFile(a.uri, a.name, a.mimeType || 'application/octet-stream');
-        const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
+        const mf: MediaFile = { id: mkId(), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section };
         if (section === 'pre_op') setPreOp((cur) => [...cur, mf]); else setPostOp((cur) => [...cur, mf]);
       } catch (e: any) {
         failures.push(`${a.name}: ${e?.message || 'upload failed'}`);
@@ -157,7 +158,7 @@ export default function AddPatient() {
       const mime = asset.mimeType || 'video/mp4';
       try {
         const up = await api.uploadFile(asset.uri, name, mime);
-        const mf: MediaFile = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section: 'video' };
+        const mf: MediaFile = { id: mkId(), name: up.name, kind: up.kind, mime: up.mime, size: up.size, storage_path: up.storage_path, section: 'video' };
         setVideos((cur) => [...cur, mf]);
       } catch (e: any) {
         failures.push(`${name}: ${e?.message || 'upload failed'}`);
