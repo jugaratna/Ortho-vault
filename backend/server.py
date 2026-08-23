@@ -1,5 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Query, Depends
 from fastapi.responses import Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -9,10 +10,12 @@ import io
 import logging
 import uuid
 import requests
+import jwt
+import bcrypt
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from emergentintegrations.llm.openai.speech_to_text import OpenAISpeechToText
 
 
@@ -33,6 +36,12 @@ storage_key: Optional[str] = None
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+bearer = HTTPBearer(auto_error=False)
+
+# Auth config
+JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "orthovault-dev-secret-change-me")
+JWT_ALGO = "HS256"
+TOKEN_MINUTES = 60 * 24 * 7  # 7 days
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -106,6 +115,8 @@ class Patient(BaseModel):
     history: str = ""
     date_of_surgery: Optional[str] = None  # ISO YYYY-MM-DD
     followup_days: Optional[int] = None  # per-patient override (null = use global)
+    operative_note: str = ""
+    discharge_note: str = ""
     result: str = ""
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []
@@ -125,10 +136,87 @@ class PatientUpsert(BaseModel):
     history: str = ""
     date_of_surgery: Optional[str] = None
     followup_days: Optional[int] = None
+    operative_note: str = ""
+    discharge_note: str = ""
     result: str = ""
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []
     videos: List[MediaFile] = []
+
+
+# ---------- Auth Models ----------
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=72)
+    name: str = ""
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=72)
+    name: str = ""
+    role: str = "editor"  # admin | editor | viewer
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    name: str = ""
+    role: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+def _hash_pw(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode("utf-8")[:72], bcrypt.gensalt(rounds=12)).decode()
+
+
+def _verify_pw(pw: str, stored: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode("utf-8")[:72], stored.encode())
+    except Exception:
+        return False
+
+
+def _make_token(user: dict) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user["id"],
+        "role": user["role"],
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=TOKEN_MINUTES)).timestamp()),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+async def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer)) -> dict:
+    if not creds or not creds.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def require_roles(*roles):
+    async def dep(user=Depends(current_user)):
+        if user["role"] not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return dep
 
 
 # ---------- Routes ----------

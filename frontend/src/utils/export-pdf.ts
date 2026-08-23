@@ -72,6 +72,12 @@ function renderPatientBody(p: Patient) {
   <h2>Post-operative Documents</h2>
   ${mediaBlock('Post-op files', p.post_op || [])}
 
+  <h2>Operative Note</h2>
+  <div class="note">${esc((p as any).operative_note || 'No operative note recorded.')}</div>
+
+  <h2>Discharge Note</h2>
+  <div class="note">${esc((p as any).discharge_note || 'No discharge note recorded.')}</div>
+
   <h2>Result / Clinical Outcome</h2>
   <div class="note">${esc(p.result || 'No outcome recorded yet.')}</div>
 

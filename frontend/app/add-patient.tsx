@@ -46,6 +46,8 @@ export default function AddPatient() {
   const [diagnosis, setDiagnosis] = useState('');
   const [history, setHistory] = useState('');
   const [result, setResult] = useState('');
+  const [operativeNote, setOperativeNote] = useState('');
+  const [dischargeNote, setDischargeNote] = useState('');
   const [dos, setDos] = useState<Date | null>(null);
   const [preOp, setPreOp] = useState<MediaFile[]>([]);
   const [postOp, setPostOp] = useState<MediaFile[]>([]);
@@ -58,6 +60,7 @@ export default function AddPatient() {
   const { followupDays: globalFollowup } = useSettings();
   const [followupDays, setFollowupDays] = useState<number | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [templateTarget, setTemplateTarget] = useState<'result' | 'operative_note' | 'discharge_note'>('result');
   const { items: customTemplates, refresh: refreshCustom } = useCustomTemplates();
 
   useEffect(() => {
@@ -71,6 +74,8 @@ export default function AddPatient() {
         setCountryCode(p.country_code || '+91');
         setMobile(p.mobile); setDiagnosis(p.diagnosis || ''); setHistory(p.history || '');
         setResult(p.result || '');
+        setOperativeNote((p as any).operative_note || '');
+        setDischargeNote((p as any).discharge_note || '');
         setDos(p.date_of_surgery ? new Date(p.date_of_surgery) : null);
         setFollowupDays(p.followup_days ?? null);
         setPreOp(p.pre_op || []); setPostOp(p.post_op || []); setVideos(p.videos || []);
@@ -180,9 +185,16 @@ export default function AddPatient() {
   };
 
   const insertTemplate = (tpl: Template) => {
-    setResult((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + tpl.body);
+    const dst = tpl.target || templateTarget;
+    const setter = dst === 'operative_note' ? setOperativeNote : dst === 'discharge_note' ? setDischargeNote : setResult;
+    setter((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + tpl.body);
     setShowTemplates(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const openTemplateFor = (target: 'result' | 'operative_note' | 'discharge_note') => {
+    setTemplateTarget(target);
+    setShowTemplates(true);
   };
 
   const save = async () => {
@@ -204,6 +216,8 @@ export default function AddPatient() {
         diagnosis: diagnosis.trim(),
         history,
         result,
+        operative_note: operativeNote,
+        discharge_note: dischargeNote,
         followup_days: followupDays,
         date_of_surgery: dos ? dos.toISOString().slice(0, 10) : null,
         pre_op: preOp,
@@ -342,12 +356,62 @@ export default function AddPatient() {
           {videos.length > 0 && <FileGrid files={videos} onRemove={(fid) => removeFile('video', fid)} />}
         </Section>
 
+        <Section title="Operative Note" colors={colors}>
+          <Field label="Intra-op Findings, Approach, Implants">
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+              <Pressable
+                testID="open-template-operative"
+                onPress={() => openTemplateFor('operative_note')}
+                style={[styles.templateBtn, { backgroundColor: colors.brandTertiary, borderColor: colors.brand }]}
+              >
+                <Ionicons name="library-outline" size={14} color={colors.brand} />
+                <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Insert Template</Text>
+                <Ionicons name="chevron-down" size={12} color={colors.brand} />
+              </Pressable>
+            </View>
+            <TextInput
+              testID="input-operative-note"
+              value={operativeNote}
+              onChangeText={setOperativeNote}
+              multiline
+              placeholder="Tap Insert Template for a structured Operative Note"
+              placeholderTextColor={colors.muted}
+              style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, minHeight: 140 }]}
+            />
+          </Field>
+        </Section>
+
+        <Section title="Discharge Note" colors={colors}>
+          <Field label="Discharge Summary & Follow-up Plan">
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+              <Pressable
+                testID="open-template-discharge"
+                onPress={() => openTemplateFor('discharge_note')}
+                style={[styles.templateBtn, { backgroundColor: colors.brandTertiary, borderColor: colors.brand }]}
+              >
+                <Ionicons name="library-outline" size={14} color={colors.brand} />
+                <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Insert Template</Text>
+                <Ionicons name="chevron-down" size={12} color={colors.brand} />
+              </Pressable>
+            </View>
+            <TextInput
+              testID="input-discharge-note"
+              value={dischargeNote}
+              onChangeText={setDischargeNote}
+              multiline
+              placeholder="Tap Insert Template for a structured Discharge Summary"
+              placeholderTextColor={colors.muted}
+              style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, minHeight: 140 }]}
+            />
+          </Field>
+        </Section>
+
         <Section title="Result / Outcome" colors={colors}>
           <Field label="Clinical Result Notes">
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
               <Pressable
                 testID="open-template-library"
-                onPress={() => setShowTemplates(true)}
+                onPress={() => openTemplateFor('result')}
                 style={[styles.templateBtn, { backgroundColor: colors.brandTertiary, borderColor: colors.brand }]}
               >
                 <Ionicons name="library-outline" size={14} color={colors.brand} />
@@ -393,7 +457,11 @@ export default function AddPatient() {
             <View style={styles.modalHead}>
               <View>
                 <Text style={[styles.modalTitle, { color: colors.onSurface }]}>Template Library</Text>
-                <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>Insert a standard clinical note into the Result field</Text>
+                <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>
+                  Inserts into <Text style={{ color: colors.brand, fontWeight: '700' }}>
+                    {templateTarget === 'operative_note' ? 'Operative Note' : templateTarget === 'discharge_note' ? 'Discharge Note' : 'Result / Outcome'}
+                  </Text>
+                </Text>
               </View>
               <Pressable testID="template-close" onPress={() => setShowTemplates(false)}>
                 <Ionicons name="close" size={22} color={colors.onSurface} />

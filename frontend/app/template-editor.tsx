@@ -15,6 +15,7 @@ export default function TemplateEditor() {
 
   const [label, setLabel] = useState('');
   const [body, setBody] = useState('');
+  const [target, setTarget] = useState<'result' | 'operative_note' | 'discharge_note'>('operative_note');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!id);
   const [error, setError] = useState('');
@@ -23,7 +24,7 @@ export default function TemplateEditor() {
     if (!id) return;
     loadCustomTemplates().then((items) => {
       const t = items.find((x) => x.id === id);
-      if (t) { setLabel(t.label); setBody(t.body); }
+      if (t) { setLabel(t.label); setBody(t.body); if (t.target) setTarget(t.target); }
       setLoading(false);
     });
   }, [id]);
@@ -37,6 +38,7 @@ export default function TemplateEditor() {
         id: id || `custom-${Date.now()}`,
         label: label.trim(),
         icon: 'bookmark-outline',
+        target,
         body,
       };
       await upsertCustomTemplate(tpl);
@@ -80,6 +82,27 @@ export default function TemplateEditor() {
           placeholderTextColor={colors.muted}
           style={[styles.input, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
         />
+
+        <Text style={[styles.label, { color: colors.onSurfaceTertiary, marginTop: spacing.lg }]}>INSERTS INTO</Text>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {([
+            { v: 'operative_note', label: 'Operative Note' },
+            { v: 'discharge_note', label: 'Discharge Note' },
+            { v: 'result', label: 'Result / Outcome' },
+          ] as { v: 'result' | 'operative_note' | 'discharge_note'; label: string }[]).map((opt) => {
+            const active = target === opt.v;
+            return (
+              <Pressable
+                key={opt.v}
+                testID={`target-${opt.v}`}
+                onPress={() => setTarget(opt.v)}
+                style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, backgroundColor: active ? colors.brandPrimary : colors.surfaceSecondary, borderColor: active ? colors.brandPrimary : colors.border }}
+              >
+                <Text style={{ color: active ? colors.onBrandPrimary : colors.onSurface, fontWeight: '600', fontSize: 12 }}>{opt.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <Text style={[styles.label, { color: colors.onSurfaceTertiary, marginTop: spacing.lg }]}>TEMPLATE BODY</Text>
         <TextInput

@@ -1,11 +1,14 @@
 // Standard orthopedic clinical templates — one-tap insertion
 export type TplIcon = 'document-text-outline' | 'medkit-outline' | 'body-outline' | 'construct-outline' | 'clipboard-outline' | 'bookmark-outline';
 
+export type TplTarget = 'result' | 'operative_note' | 'discharge_note';
+
 export type Template = {
   id: string;
   label: string;
   icon: TplIcon;
   body: string;
+  target?: TplTarget; // where the template inserts by default
   builtin?: boolean;
 };
 
@@ -14,6 +17,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export const TEMPLATES: Template[] = [
   {
     id: 'operative-note',
+    target: 'operative_note',
     label: 'Operative Note',
     icon: 'clipboard-outline',
     builtin: true,
@@ -79,6 +83,7 @@ Date: ${today()}`,
   },
   {
     id: 'discharge',
+    target: 'discharge_note',
     label: 'Discharge Summary',
     icon: 'document-text-outline',
     builtin: true,
@@ -134,6 +139,7 @@ Signature: _______________`,
   },
   {
     id: 'trauma',
+    target: 'result',
     label: 'Trauma Notes',
     icon: 'medkit-outline',
     builtin: true,
@@ -182,6 +188,7 @@ Date: ${today()}`,
   },
   {
     id: 'arthroscopy',
+    target: 'operative_note',
     label: 'Arthroscopy Findings',
     icon: 'body-outline',
     builtin: true,
@@ -233,6 +240,7 @@ Date: ${today()}`,
   },
   {
     id: 'fracture',
+    target: 'operative_note',
     label: 'Fracture Reduction',
     icon: 'construct-outline',
     builtin: true,

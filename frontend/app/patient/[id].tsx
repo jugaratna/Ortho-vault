@@ -172,17 +172,37 @@ function HistoryTab({ patient }: { patient: Patient }) {
 function ResultsTab({ patient }: { patient: Patient }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
-      <View style={styles.notesHead}>
-        <Text style={[styles.sectionLabel, { color: colors.muted }]}>CLINICAL RESULT / OUTCOME</Text>
-        <Pressable testID="download-result-btn" onPress={() => exportPatientNotesPdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
-          <Ionicons name="download-outline" size={13} color={colors.brand} />
-          <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Notes PDF</Text>
-        </Pressable>
+    <View style={{ gap: spacing.md }}>
+      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
+        <View style={styles.notesHead}>
+          <Text style={[styles.sectionLabel, { color: colors.muted }]}>OPERATIVE NOTE</Text>
+        </View>
+        <Text style={{ color: colors.onSurface, fontSize: 14, lineHeight: 21 }}>
+          {(patient as any).operative_note || 'No operative note recorded.'}
+        </Text>
       </View>
-      <Text style={{ color: colors.onSurface, fontSize: 15, lineHeight: 22 }}>
-        {patient.result || 'No outcome recorded yet.'}
-      </Text>
+
+      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
+        <View style={styles.notesHead}>
+          <Text style={[styles.sectionLabel, { color: colors.muted }]}>DISCHARGE NOTE</Text>
+        </View>
+        <Text style={{ color: colors.onSurface, fontSize: 14, lineHeight: 21 }}>
+          {(patient as any).discharge_note || 'No discharge note recorded.'}
+        </Text>
+      </View>
+
+      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
+        <View style={styles.notesHead}>
+          <Text style={[styles.sectionLabel, { color: colors.muted }]}>CLINICAL RESULT / OUTCOME</Text>
+          <Pressable testID="download-result-btn" onPress={() => exportPatientNotesPdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
+            <Ionicons name="download-outline" size={13} color={colors.brand} />
+            <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Notes PDF</Text>
+          </Pressable>
+        </View>
+        <Text style={{ color: colors.onSurface, fontSize: 14, lineHeight: 21 }}>
+          {patient.result || 'No outcome recorded yet.'}
+        </Text>
+      </View>
     </View>
   );
 }

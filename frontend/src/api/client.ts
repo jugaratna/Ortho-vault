@@ -29,6 +29,8 @@ export type Patient = {
   history: string;
   date_of_surgery?: string | null;
   followup_days?: number | null;
+  operative_note: string;
+  discharge_note: string;
   result: string;
   pre_op: MediaFile[];
   post_op: MediaFile[];
