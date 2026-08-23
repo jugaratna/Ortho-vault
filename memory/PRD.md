@@ -1,7 +1,8 @@
 # OrthoVault — Product Requirements
 
-<!-- v9: (1) Backend split into modules: config.py, db.py, deps.py, models.py, storage.py, emailing.py, routes/{auth,patients,files,ai}.py — server.py is now a slim assembly. (2) Emergent Resend integration for invite emails: guardrail gate + server-side template + POST /api/auth/invites returns `emailed` flag. (3) Bulk invite endpoint POST /api/auth/invites/bulk (up to 100 emails, dedupes, reports invalid/updated/emailed). (4) Idle Watch: 30+ day idle members get a subtle IDLE badge on the Team screen. -->
-<!-- v8: Added Invite by Email + Team Activity Log. Admins can pre-authorize colleagues by email/role, copy a ready-to-share sign-in link, revoke pending invites, and see each member's "Active X ago" timestamp. -->
+<!-- v10: (1) Deep Link Invites — invite emails include `?invite=<email>&role=<role>` params so /login shows a personalized welcome banner "Sign in with <email> to join as <role>". (2) Team Activity Feed — new `activity_log` collection auto-writes create/update/delete/share/unshare/media_added events; admin-only `GET /api/activity`. Team screen shows a 5-item preview + "View all →" link; full `/activity` screen with All/Created/Updated/Deleted/Sharing filters. (3) Patient Sharing — owners can share individual patients with any admin/editor colleague with per-share scope (view-only or edit). New endpoints `GET /api/auth/colleagues`, `POST/DELETE /api/patients/{id}/share`. Patient detail page has a Share button (with count badge) and a share modal with scope toggle, search, and unshare. -->
+<!-- v9: Backend split into modules; Emergent Resend invite emails; Bulk invite endpoint; Idle Watch badge. -->
+<!-- v8: Invite by Email + Team Activity Log. -->
 
 
 ## Purpose

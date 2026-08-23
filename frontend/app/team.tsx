@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
-import { api, BACKEND_URL } from '@/src/api/client';
+import { api, BACKEND_URL, ActivityEvent } from '@/src/api/client';
 import { useAuth, Role } from '@/src/auth';
 import { useTheme, spacing, radius } from '@/src/theme';
 
@@ -74,6 +74,7 @@ export default function Team() {
 
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState<TeamUser | null>(null);
@@ -93,9 +94,14 @@ export default function Team() {
 
   const load = useCallback(async () => {
     try {
-      const [list, invs] = await Promise.all([api.listUsers(), api.listInvites().catch(() => [])]);
+      const [list, invs, acts] = await Promise.all([
+        api.listUsers(),
+        api.listInvites().catch(() => []),
+        api.listActivity(5).catch(() => []),
+      ]);
       setUsers(list);
       setInvites(invs);
+      setActivity(acts);
       setError('');
     } catch (e: any) {
       setError(e?.message || 'Could not load team');
@@ -265,6 +271,58 @@ export default function Team() {
             <View style={[styles.errBanner, { backgroundColor: colors.error + '22', borderColor: colors.error }]}>
               <Ionicons name="alert-circle" size={16} color={colors.error} />
               <Text style={{ color: colors.error, fontSize: 12, flex: 1 }}>{error}</Text>
+            </View>
+          )}
+
+          {activity.length > 0 && (
+            <View style={{ marginBottom: spacing.lg }}>
+              <View style={styles.sectionHead}>
+                <Text style={[styles.sectionLabel, { color: colors.muted, marginBottom: 0 }]}>RECENT ACTIVITY</Text>
+                <Pressable testID="view-all-activity" onPress={() => router.push('/activity')} hitSlop={8}>
+                  <Text style={{ color: colors.brand, fontSize: 12, fontWeight: '700' }}>View all →</Text>
+                </Pressable>
+              </View>
+              <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
+                {activity.slice(0, 5).map((ev) => {
+                  const iconMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+                    create: 'add-circle',
+                    update: 'create',
+                    delete: 'trash',
+                    share: 'people',
+                    unshare: 'person-remove',
+                    media_added: 'images',
+                  };
+                  const verbMap: Record<string, string> = {
+                    create: 'created',
+                    update: 'updated',
+                    delete: 'deleted',
+                    share: 'shared',
+                    unshare: 'stopped sharing',
+                    media_added: 'added media to',
+                  };
+                  const colorMap: Record<string, string> = {
+                    create: colors.success,
+                    update: colors.brand,
+                    delete: colors.error,
+                    share: colors.brand,
+                    unshare: colors.warning,
+                    media_added: colors.brand,
+                  };
+                  const c = colorMap[ev.action] || colors.muted;
+                  return (
+                    <View key={ev.id} style={[styles.activityMini, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                      <View style={[styles.miniIcon, { backgroundColor: c + '22' }]}>
+                        <Ionicons name={iconMap[ev.action] || 'ellipse'} size={13} color={c} />
+                      </View>
+                      <Text numberOfLines={1} style={{ flex: 1, color: colors.onSurface, fontSize: 12 }}>
+                        <Text style={{ fontWeight: '700' }}>{ev.actor_name || 'Someone'}</Text>
+                        <Text style={{ color: colors.muted }}>{' '}{verbMap[ev.action] || ev.action}{' '}</Text>
+                        <Text style={{ fontWeight: '700' }}>{ev.entity_name || '(patient)'}</Text>
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
             </View>
           )}
 
@@ -652,4 +710,7 @@ const styles = StyleSheet.create({
   textarea: { minHeight: 100, textAlignVertical: 'top', paddingTop: 12 },
   emailStatus: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginTop: spacing.sm },
   statCard: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 12, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, gap: 4 },
+  sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  activityMini: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
+  miniIcon: { width: 26, height: 26, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
 });

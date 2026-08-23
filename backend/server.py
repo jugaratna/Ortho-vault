@@ -21,6 +21,7 @@ from routes.auth import router as auth_router
 from routes.patients import router as patients_router
 from routes.files import router as files_router
 from routes.ai import router as ai_router
+from routes.activity import router as activity_router
 
 
 app = FastAPI(title="OrthoVault API")
@@ -37,6 +38,7 @@ api_router.include_router(auth_router)
 api_router.include_router(patients_router)
 api_router.include_router(files_router)
 api_router.include_router(ai_router)
+api_router.include_router(activity_router)
 
 app.include_router(api_router)
 
@@ -63,6 +65,8 @@ async def _startup():
         await db.user_sessions.create_index("user_id")
         await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
         await db.invites.create_index("email", unique=True)
+        await db.activity_log.create_index("at")
+        await db.patients.create_index("shared_with.user_id")
         logger.info("Indexes ensured")
     except Exception as e:
         logger.warning(f"Index creation failed: {e}")

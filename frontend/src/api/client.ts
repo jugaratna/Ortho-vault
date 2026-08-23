@@ -19,6 +19,14 @@ export type MediaFile = {
   uploaded_at?: string;
 };
 
+export type ShareEntry = {
+  user_id: string;
+  scope: 'read' | 'edit';
+  email: string;
+  name: string;
+  shared_at?: string;
+};
+
 export type Patient = {
   id: string;
   name: string;
@@ -36,8 +44,24 @@ export type Patient = {
   pre_op: MediaFile[];
   post_op: MediaFile[];
   videos: MediaFile[];
+  shared_with?: ShareEntry[];
+  owner_id?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+export type Colleague = { user_id: string; email: string; name: string; role: 'admin' | 'editor' };
+
+export type ActivityEvent = {
+  id: string;
+  actor_id: string;
+  actor_name: string;
+  action: 'create' | 'update' | 'delete' | 'share' | 'unshare' | 'media_added' | string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  meta: Record<string, any>;
+  at: string;
 };
 
 export function fileUrl(storagePath: string) {
@@ -154,5 +178,32 @@ export const api = {
       headers: authHeaders(),
     });
     return json<{ ok: boolean }>(res);
+  },
+
+  async listColleagues(): Promise<Colleague[]> {
+    const res = await fetch(`${API_BASE}/auth/colleagues`, { headers: authHeaders() });
+    return json<Colleague[]>(res);
+  },
+
+  async sharePatient(pid: string, user_id: string, scope: 'read' | 'edit') {
+    const res = await fetch(`${API_BASE}/patients/${pid}/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ user_id, scope }),
+    });
+    return json<{ ok: boolean; entry: ShareEntry }>(res);
+  },
+
+  async unsharePatient(pid: string, user_id: string) {
+    const res = await fetch(`${API_BASE}/patients/${pid}/share/${encodeURIComponent(user_id)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    return json<{ ok: boolean }>(res);
+  },
+
+  async listActivity(limit = 50): Promise<ActivityEvent[]> {
+    const res = await fetch(`${API_BASE}/activity?limit=${limit}`, { headers: authHeaders() });
+    return json<ActivityEvent[]>(res);
   },
 };

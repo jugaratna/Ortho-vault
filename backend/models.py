@@ -16,6 +16,14 @@ class MediaFile(BaseModel):
     uploaded_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class ShareEntry(BaseModel):
+    user_id: str
+    scope: str = "read"  # "read" | "edit"
+    email: str = ""
+    name: str = ""
+    shared_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class Patient(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -33,6 +41,8 @@ class Patient(BaseModel):
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []
     videos: List[MediaFile] = []
+    shared_with: List[ShareEntry] = []
+    owner_id: Optional[str] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -54,6 +64,7 @@ class PatientUpsert(BaseModel):
     pre_op: List[MediaFile] = []
     post_op: List[MediaFile] = []
     videos: List[MediaFile] = []
+    shared_with: List[ShareEntry] = []
 
 
 # ---- Auth ----
@@ -104,3 +115,27 @@ class DraftDischargeIn(BaseModel):
     date_of_surgery: Optional[str] = None
     operative_note: str = ""
     result: str = ""
+
+
+class ShareIn(BaseModel):
+    user_id: str
+    scope: str = "read"  # "read" | "edit"
+
+
+class ColleagueOut(BaseModel):
+    user_id: str
+    email: str
+    name: str = ""
+    role: str = "editor"
+
+
+class ActivityOut(BaseModel):
+    id: str
+    actor_id: str
+    actor_name: str
+    action: str
+    entity_type: str
+    entity_id: str
+    entity_name: str
+    meta: dict = {}
+    at: str

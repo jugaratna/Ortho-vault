@@ -12,7 +12,7 @@ from db import db
 from deps import current_user, require_admin
 from models import (
     SessionExchange, SessionOut, UserOut,
-    InviteIn, InviteOut, BulkInviteIn, RoleUpdate,
+    InviteIn, InviteOut, BulkInviteIn, RoleUpdate, ColleagueOut,
 )
 from emailing import build_invite_email, send_email, _sanitize_url_for_email
 
@@ -21,25 +21,26 @@ router = APIRouter(prefix="/auth")
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
-def _base_sign_in_url(request: Request) -> Optional[str]:
+def _base_sign_in_url(request: Request, invite_email: str = "", invite_role: str = "") -> Optional[str]:
     """Derive a safe absolute https URL to /login from the request's Origin header.
 
-    Only accept clean https URLs; otherwise return None (email will be sent without
-    a link). This satisfies G3 by using the caller's own trusted origin — the caller
-    is the authenticated admin's browser/app.
+    Optionally appends `?invite=<email>&role=<role>` so the login screen can show a
+    personalized welcome banner (deep-link friendly). Only accepts clean https URLs.
     """
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
     if not origin:
         return None
-    # If a referer with path was passed, keep just scheme + host
     try:
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, urlencode
         p = urlparse(origin.strip())
         if p.scheme and p.hostname:
             base = f"{p.scheme}://{p.hostname}"
             if p.port and p.port not in (80, 443):
                 base += f":{p.port}"
             candidate = f"{base}/login"
+            if invite_email:
+                qs = urlencode({"invite": invite_email, "role": invite_role or "editor"})
+                candidate = f"{candidate}?{qs}"
             return _sanitize_url_for_email(candidate)
     except Exception:
         return None
@@ -159,6 +160,19 @@ async def update_user_role(user_id: str, payload: RoleUpdate, _=Depends(require_
     return {"ok": True}
 
 
+@router.get("/colleagues", response_model=List[ColleagueOut])
+async def list_colleagues(user=Depends(current_user)):
+    """Non-viewer team members visible to any authenticated user (for sharing UI).
+
+    Returns everyone who can be a share recipient (admin/editor), excluding the caller.
+    """
+    docs = await db.users.find(
+        {"role": {"$in": ["admin", "editor"]}, "user_id": {"$ne": user["user_id"]}},
+        {"_id": 0, "user_id": 1, "email": 1, "name": 1, "role": 1},
+    ).to_list(500)
+    return [ColleagueOut(**d) for d in docs]
+
+
 # ---------------- Invites ----------------
 @router.get("/invites", response_model=List[InviteOut])
 async def list_invites(_=Depends(require_admin)):
@@ -229,7 +243,7 @@ async def create_invite(payload: InviteIn, request: Request, user=Depends(requir
     invite, is_user = await _create_or_update_invite(email, payload.role)
     sent = False
     if not is_user:
-        sign_in_url = _base_sign_in_url(request)
+        sign_in_url = _base_sign_in_url(request, invite_email=email, invite_role=payload.role)
         sent = await _send_invite_email_safe(
             invitee_email=email,
             role=payload.role,
@@ -275,11 +289,12 @@ async def bulk_invite(payload: BulkInviteIn, request: Request, user=Depends(requ
         if is_user:
             updated.append(out)
         else:
+            per_link = _base_sign_in_url(request, invite_email=email, invite_role=payload.role)
             sent = await _send_invite_email_safe(
                 invitee_email=email,
                 role=payload.role,
                 invited_by_name=inviter_name,
-                sign_in_url=sign_in_url,
+                sign_in_url=per_link,
             )
             if sent:
                 emailed_count += 1

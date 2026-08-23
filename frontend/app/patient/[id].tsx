@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Alert } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -7,7 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { api, fileUrl, MediaFile, Patient } from '@/src/api/client';
+import { api, fileUrl, MediaFile, Patient, Colleague, ShareEntry } from '@/src/api/client';
+import { useAuth } from '@/src/auth';
 import { useTheme, spacing, radius } from '@/src/theme';
 import { exportPatientPdf, exportPatientNotesPdf, downloadMediaFile, exportOperativeNotePdf, exportDischargeNotePdf } from '@/src/utils/export-pdf';
 
@@ -18,13 +19,21 @@ export default function PatientDetail() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { user } = useAuth();
   const [patient, setPatient] = useState<Patient | null>(null);
   const [tab, setTab] = useState<Tab>('demographics');
   const [loading, setLoading] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     api.getPatient(id).then(setPatient).finally(() => setLoading(false));
   }, [id]);
+
+  const isOwner = useMemo(() => {
+    if (!patient || !user) return false;
+    if (user.role === 'admin') return true;
+    return patient.owner_id === user.user_id || !patient.owner_id;
+  }, [patient, user]);
 
   const onDelete = async () => {
     await api.deletePatient(id);
@@ -66,12 +75,24 @@ export default function PatientDetail() {
             <Pressable testID="export-patient-btn" onPress={onExport} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name="share-outline" size={20} color={colors.onSurface} />
             </Pressable>
+            {isOwner && user?.role !== 'viewer' && (
+              <Pressable testID="share-patient-btn" onPress={() => setShareOpen(true)} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
+                <Ionicons name="people-outline" size={20} color={colors.onSurface} />
+                {(patient.shared_with?.length || 0) > 0 && (
+                  <View style={[styles.shareDot, { backgroundColor: colors.brandPrimary, borderColor: colors.surface }]}>
+                    <Text style={{ color: colors.onBrandPrimary, fontSize: 9, fontWeight: '800' }}>{patient.shared_with!.length}</Text>
+                  </View>
+                )}
+              </Pressable>
+            )}
             <Pressable testID="edit-patient-btn" onPress={() => router.push({ pathname: '/add-patient', params: { id: patient.id } })} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name="create-outline" size={20} color={colors.onSurface} />
             </Pressable>
-            <Pressable testID="delete-patient-btn" onPress={onDelete} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
-              <Ionicons name="trash-outline" size={20} color={colors.error} />
-            </Pressable>
+            {isOwner && (
+              <Pressable testID="delete-patient-btn" onPress={onDelete} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
+                <Ionicons name="trash-outline" size={20} color={colors.error} />
+              </Pressable>
+            )}
           </View>
         </View>
 
@@ -114,7 +135,208 @@ export default function PatientDetail() {
         {tab === 'video' && <VideoTab patient={patient} />}
         {tab === 'timeline' && <TimelineTab patient={patient} />}
       </ScrollView>
+
+      <ShareModal
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        patient={patient}
+        onChange={(updated) => setPatient(updated)}
+      />
     </View>
+  );
+}
+
+function ShareModal({ visible, onClose, patient, onChange }: { visible: boolean; onClose: () => void; patient: Patient; onChange: (p: Patient) => void }) {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const [colleagues, setColleagues] = useState<Colleague[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<string>(''); // user_id currently being saved
+  const [error, setError] = useState('');
+  const [scope, setScope] = useState<'read' | 'edit'>('read');
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    if (!visible) return;
+    setLoading(true);
+    api.listColleagues()
+      .then(setColleagues)
+      .catch((e) => setError(e?.message || 'Could not load colleagues'))
+      .finally(() => setLoading(false));
+  }, [visible]);
+
+  const currentShares: ShareEntry[] = patient.shared_with || [];
+  const sharedIds = new Set(currentShares.map((s) => s.user_id));
+
+  const filtered = colleagues.filter((c) => {
+    if (!q.trim()) return true;
+    const needle = q.trim().toLowerCase();
+    return (c.name || '').toLowerCase().includes(needle) || c.email.toLowerCase().includes(needle);
+  });
+
+  const share = async (c: Colleague) => {
+    setBusy(c.user_id);
+    setError('');
+    try {
+      const res = await api.sharePatient(patient.id, c.user_id, scope);
+      const newShares = currentShares.filter((s) => s.user_id !== c.user_id).concat([res.entry]);
+      onChange({ ...patient, shared_with: newShares });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      setError(e?.message || 'Could not share');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const unshare = async (userId: string, email: string) => {
+    Alert.alert('Remove access?', `${email} will no longer see this patient.`, [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive', onPress: async () => {
+          setBusy(userId);
+          try {
+            await api.unsharePatient(patient.id, userId);
+            onChange({ ...patient, shared_with: currentShares.filter((s) => s.user_id !== userId) });
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          } catch (e: any) {
+            setError(e?.message || 'Could not remove');
+          } finally {
+            setBusy('');
+          }
+        }
+      },
+    ]);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.shareCard, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.lg }]}>
+          <View style={styles.shareHead}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={{ color: colors.onSurface, fontSize: 18, fontWeight: '700' }}>Share patient</Text>
+              <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>
+                {patient.name} · {currentShares.length} share{currentShares.length === 1 ? '' : 's'}
+              </Text>
+            </View>
+            <Pressable testID="share-modal-close" onPress={onClose}>
+              <Ionicons name="close" size={22} color={colors.onSurface} />
+            </Pressable>
+          </View>
+
+          <Text style={[styles.shareLabel, { color: colors.muted }]}>ACCESS LEVEL</Text>
+          <View style={[styles.scopeRow, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+            {(['read', 'edit'] as const).map((s) => {
+              const active = scope === s;
+              return (
+                <Pressable
+                  key={s}
+                  testID={`share-scope-${s}`}
+                  onPress={() => { setScope(s); Haptics.selectionAsync(); }}
+                  style={[styles.scopeTab, active && { backgroundColor: colors.brandPrimary }]}
+                >
+                  <Ionicons name={s === 'read' ? 'eye-outline' : 'create-outline'} size={14} color={active ? colors.onBrandPrimary : colors.onSurface} />
+                  <Text style={{ color: active ? colors.onBrandPrimary : colors.onSurface, fontWeight: '700', fontSize: 13 }}>
+                    {s === 'read' ? 'View only' : 'Can edit'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={{ color: colors.muted, fontSize: 11, marginTop: 4 }}>
+            {scope === 'read' ? 'They can open the record and view media, but cannot change anything.' : 'They can edit fields and upload media just like you.'}
+          </Text>
+
+          {currentShares.length > 0 && (
+            <>
+              <Text style={[styles.shareLabel, { color: colors.muted, marginTop: spacing.lg }]}>ALREADY SHARED WITH</Text>
+              {currentShares.map((s) => (
+                <View key={s.user_id} style={[styles.shareRow, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                  <View style={[styles.avatarSm, { backgroundColor: colors.brandTertiary }]}>
+                    <Ionicons name="person" size={16} color={colors.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={{ color: colors.onSurface, fontWeight: '700', fontSize: 14 }}>{s.name || s.email}</Text>
+                    <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 1 }}>{s.email}</Text>
+                  </View>
+                  <View style={[styles.scopePill, { backgroundColor: colors.surfaceTertiary, borderColor: colors.border }]}>
+                    <Ionicons name={s.scope === 'edit' ? 'create-outline' : 'eye-outline'} size={11} color={colors.onSurface} />
+                    <Text style={{ color: colors.onSurface, fontSize: 10, fontWeight: '700' }}>{s.scope === 'edit' ? 'Edit' : 'View'}</Text>
+                  </View>
+                  <Pressable
+                    testID={`unshare-${s.user_id}`}
+                    onPress={() => unshare(s.user_id, s.email)}
+                    disabled={busy === s.user_id}
+                    style={styles.iconBtnSm}
+                    hitSlop={8}
+                  >
+                    {busy === s.user_id
+                      ? <ActivityIndicator size="small" color={colors.muted} />
+                      : <Ionicons name="close-circle" size={20} color={colors.muted} />}
+                  </Pressable>
+                </View>
+              ))}
+            </>
+          )}
+
+          <Text style={[styles.shareLabel, { color: colors.muted, marginTop: spacing.lg }]}>ADD A COLLEAGUE</Text>
+          <TextInput
+            testID="share-search-input"
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search name or email"
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[styles.searchInput, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, color: colors.onSurface }]}
+          />
+
+          {!!error && (
+            <View style={[styles.errBanner, { backgroundColor: colors.error + '22', borderColor: colors.error, marginTop: spacing.sm }]}>
+              <Ionicons name="alert-circle" size={16} color={colors.error} />
+              <Text style={{ color: colors.error, fontSize: 12, flex: 1 }}>{error}</Text>
+            </View>
+          )}
+
+          <ScrollView style={{ maxHeight: 260, marginTop: spacing.sm }} keyboardShouldPersistTaps="handled">
+            {loading ? (
+              <View style={{ padding: spacing.lg, alignItems: 'center' }}>
+                <ActivityIndicator color={colors.brand} />
+              </View>
+            ) : filtered.length === 0 ? (
+              <Text style={{ color: colors.muted, fontSize: 13, textAlign: 'center', padding: spacing.lg }}>
+                No colleagues found. Invite someone from the Team screen first.
+              </Text>
+            ) : filtered.map((c) => {
+              const already = sharedIds.has(c.user_id);
+              const isBusy = busy === c.user_id;
+              return (
+                <Pressable
+                  key={c.user_id}
+                  testID={`share-target-${c.user_id}`}
+                  onPress={() => !already && !isBusy && share(c)}
+                  disabled={already || isBusy}
+                  style={({ pressed }) => [styles.shareRow, { backgroundColor: pressed && !already ? colors.surfaceTertiary : colors.surfaceSecondary, borderColor: colors.border, opacity: already ? 0.5 : 1 }]}
+                >
+                  <View style={[styles.avatarSm, { backgroundColor: colors.brandTertiary }]}>
+                    <Ionicons name="person" size={16} color={colors.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1} style={{ color: colors.onSurface, fontWeight: '700', fontSize: 14 }}>{c.name || c.email}</Text>
+                    <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, marginTop: 1 }}>{c.email} · {c.role}</Text>
+                  </View>
+                  {isBusy ? <ActivityIndicator size="small" color={colors.brand} /> : already
+                    ? <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                    : <Ionicons name="add-circle" size={22} color={colors.brand} />}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -537,4 +759,17 @@ const styles = StyleSheet.create({
   tlCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
   tlThumb: { width: 56, height: 56, borderRadius: radius.sm },
   tlDlBtn: { width: 32, height: 32, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  shareDot: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 999, paddingHorizontal: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  shareCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, maxHeight: '85%' },
+  shareHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  shareLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8, marginBottom: 6 },
+  scopeRow: { flexDirection: 'row', padding: 4, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, gap: 4 },
+  scopeTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: radius.sm },
+  shareRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: spacing.sm, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: 6 },
+  avatarSm: { width: 32, height: 32, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  scopePill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  iconBtnSm: { padding: 4 },
+  searchInput: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
+  errBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
 });
