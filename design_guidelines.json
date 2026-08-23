@@ -1,0 +1,201 @@
+{
+  "app_name": "OrthoVault",
+  "personality": "1 iOS-Native Clean (Adapted for Clinical Utility)",
+  "personality_one_liner": "A highly readable, authoritative clinical tool designed for rapid data retrieval in harsh surgical lighting environments.",
+  "color": {
+    "surface": "#F8FAFC",
+    "onSurface": "#0F172A",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1E293B",
+    "surfaceTertiary": "#F1F5F9",
+    "onSurfaceTertiary": "#334155",
+    "surfaceInverse": "#0F172A",
+    "onSurfaceInverse": "#F8FAFC",
+    "brand": "#0F766E",
+    "brandPrimary": "#0F766E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#14B8A6",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#CCFBF1",
+    "onBrandTertiary": "#115E59",
+    "success": "#059669",
+    "onSuccess": "#FFFFFF",
+    "warning": "#CA8A04",
+    "onWarning": "#FFFFFF",
+    "error": "#DC2626",
+    "onError": "#FFFFFF",
+    "info": "#475569",
+    "onInfo": "#FFFFFF",
+    "border": "#E2E8F0",
+    "borderStrong": "#94A3B8",
+    "divider": "#E2E8F0"
+  },
+  "dark_color": {
+    "surface": "#020617",
+    "onSurface": "#F8FAFC",
+    "surfaceSecondary": "#0F172A",
+    "onSurfaceSecondary": "#E2E8F0",
+    "surfaceTertiary": "#1E293B",
+    "onSurfaceTertiary": "#CBD5E1",
+    "surfaceInverse": "#F8FAFC",
+    "onSurfaceInverse": "#0F172A",
+    "brand": "#14B8A6",
+    "brandPrimary": "#14B8A6",
+    "onBrandPrimary": "#020617",
+    "brandSecondary": "#0F766E",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#115E59",
+    "onBrandTertiary": "#CCFBF1",
+    "success": "#34D399",
+    "onSuccess": "#020617",
+    "warning": "#FDE047",
+    "onWarning": "#020617",
+    "error": "#F87171",
+    "onError": "#020617",
+    "info": "#94A3B8",
+    "onInfo": "#020617",
+    "border": "#334155",
+    "borderStrong": "#64748B",
+    "divider": "#1E293B"
+  },
+  "typography": {
+    "displayFontFamily": "Space Grotesk",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous paddings around patient details for error-free tapping in surgical settings. Avoid dense layouts.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "stack_only",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use subtle glass effect on the sticky search/filter bar to keep context while scrolling patient lists.",
+      "Use on the floating action button (FAB) over a brandTertiary base."
+    ],
+    "dont's": [
+      "Do not use on patient data cards or clinical records where strict readability is paramount.",
+      "Avoid heavy blur on forms or settings."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler",
+    "video": "expo-video",
+    "pdf": "react-native-pdf"
+  },
+  "screens": [
+    {
+      "name": "Auth (PIN/Biometrics)",
+      "purpose": "Secure gateway for surgeons entering the app.",
+      "states": {
+        "loading": "Spinner during biometric verification.",
+        "empty": "N/A",
+        "error": "Shake animation and red text on incorrect PIN."
+      },
+      "layout": "Centered numpad using Space Grotesk tabular figures. Biometric (Face ID / Fingerprint) icon centered below the PIN dots. Highly legible and minimal."
+    },
+    {
+      "name": "Dashboard",
+      "purpose": "Patient list with powerful search, dynamic sorting, and quick-glance X-ray thumbnails.",
+      "states": {
+        "loading": "Skeleton rows of patient cards.",
+        "empty": "Illustration of medical clipboard + 'No patients found' + 'Add Patient' CTA.",
+        "error": "Error loading records + Retry button."
+      },
+      "layout": "Sticky header with Search bar and a horizontally scrollable chip row for Sorting (Name, Date, Pre-op, Post-op). Main content is a vertical list of Patient Cards. Cards have Demographics on the left (Name, Age, DOS) and a thumbnail stack of X-rays on the right. FAB (+ Add Patient) floating at bottom right with glass effect."
+    },
+    {
+      "name": "Add/Edit Patient Form",
+      "purpose": "Data entry for Demographics, Clinical History, DOS, and Outcomes.",
+      "states": {
+        "loading": "Saving state spinner inside the submit button.",
+        "empty": "Standard blank form fields.",
+        "error": "Inline validation messages for required fields."
+      },
+      "layout": "Single-column scrollable form. Grouped sections (Demographics, History, Outcomes) with subtle dividers. 'Save Patient' CTA is sticky at the bottom inside KeyboardAvoidingView."
+    },
+    {
+      "name": "Patient Detail (Tabbed)",
+      "purpose": "Comprehensive view of a single patient's journey, documents, and clinical outcomes.",
+      "states": {
+        "loading": "Skeleton view of patient header and tab content.",
+        "empty": "No media/history found for this tab.",
+        "error": "Failed to load patient details."
+      },
+      "layout": "Top section: Sticky Patient Header (Name, Age, Sex, Mobile, DOS). Below: Segmented control for tabs (Demographics, History, Comparison, Results, Video). 'Comparison' tab splits the view horizontally (Pre-op top, Post-op bottom) or uses a slider overlay for precise alignment. Media tabs use a grid layout for thumbnails."
+    },
+    {
+      "name": "Media Comparison Viewer",
+      "purpose": "Side-by-side or sliding comparison of Pre-op vs Post-op X-rays.",
+      "states": {
+        "loading": "Loading high-res DICOM/Images.",
+        "empty": "Prompt to upload matching Pre and Post-op files.",
+        "error": "Image load failed."
+      },
+      "layout": "Full screen modal. Top/Bottom split layout with pinch-to-zoom enabled on both simultaneously (if possible) or an interactive before/after slider overlaying the images. Dark slate background to simulate light-box contrast."
+    }
+  ],
+  "images": {
+    "dashboard_empty_state": {
+      "url": "https://images.unsplash.com/photo-1585314062340-f1a5a7c9328d?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "dark": "https://images.unsplash.com/photo-1585314062340-f1a5a7c9328d?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "alt": "Clinical slate abstract background for empty state"
+    },
+    "mock_xray_pre_op": {
+      "url": "https://images.unsplash.com/photo-1564725075388-cc8338732289?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "alt": "Pre-op knee X-ray"
+    },
+    "mock_xray_post_op": {
+      "url": "https://images.unsplash.com/photo-1564725075388-cc8338732289?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "alt": "Post-op knee X-ray with implants"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Implement clinical slate/teal palette strictly. Ensure WCAG AA contrast for text, specifically in surgical environments (dark mode).",
+    "Use Space Grotesk for clinical tabular figures (dates, ages, phone numbers) and Geist for long-form clinical notes.",
+    "The Dashboard requires a pinned search and horizontally scrolling sort chips. Make sure the Patient Card accommodates a thumbnail strip for X-rays.",
+    "Ensure 'Add Patient' FAB uses an expo-blur backdrop and is correctly anchored above safe areas.",
+    "Implement the Patient Detail view with a sticky header and a smooth Segmented Control for the tabs (Demographics, History, Comparison, Results, Video).",
+    "For the Media Comparison view, build a dedicated component that splits the screen or uses an interactive slider to compare Pre-op and Post-op images. The background must be dark (simulating an X-ray light box).",
+    "Implement robust pinch-to-zoom for the image viewer using react-native-gesture-handler.",
+    "No emojis anywhere. Use professional Ionicons for all actions."
+  ],
+  "haptics": {
+    "tab_change": "light",
+    "button_press": "medium",
+    "pull_to_refresh": "medium",
+    "pin_entry": "light",
+    "slider_snap": "selection",
+    "error_shake": "heavy"
+  }
+}
