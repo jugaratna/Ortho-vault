@@ -25,6 +25,7 @@ export type Patient = {
   sex: Sex;
   mobile: string;
   country_code: string;
+  diagnosis: string;
   history: string;
   date_of_surgery?: string | null;
   result: string;

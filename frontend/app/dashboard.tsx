@@ -22,7 +22,7 @@ type SortKey =
   | 'name_asc' | 'name_desc'
   | 'age_asc' | 'age_desc'
   | 'sex' | 'mobile'
-  | 'history'
+  | 'diagnosis' | 'history'
   | 'dos_new' | 'dos_old'
   | 'preop_count' | 'postop_count'
   | 'result' | 'has_video';
@@ -32,6 +32,7 @@ const SORTS: { key: SortKey; label: string; icon: keyof typeof Ionicons.glyphMap
   { key: 'dos_old', label: 'Oldest Surgery', icon: 'hourglass-outline' },
   { key: 'name_asc', label: 'Name A–Z', icon: 'arrow-down-outline' },
   { key: 'name_desc', label: 'Name Z–A', icon: 'arrow-up-outline' },
+  { key: 'diagnosis', label: 'Diagnosis A–Z', icon: 'medical-outline' },
   { key: 'age_asc', label: 'Age Asc', icon: 'chevron-up-outline' },
   { key: 'age_desc', label: 'Age Desc', icon: 'chevron-down-outline' },
   { key: 'sex', label: 'Group by Sex', icon: 'people-outline' },
@@ -74,6 +75,7 @@ export default function Dashboard() {
       return (
         p.name.toLowerCase().includes(query) ||
         p.mobile.includes(query) ||
+        (p.diagnosis || '').toLowerCase().includes(query) ||
         (p.history || '').toLowerCase().includes(query)
       );
     });
@@ -86,6 +88,7 @@ export default function Dashboard() {
         case 'age_desc': return b.age - a.age;
         case 'sex': return (a.sex || '').localeCompare(b.sex || '');
         case 'mobile': return (a.mobile || '').localeCompare(b.mobile || '', undefined, { numeric: true });
+        case 'diagnosis': return (a.diagnosis || '').localeCompare(b.diagnosis || '');
         case 'history': return (a.history || '').localeCompare(b.history || '');
         case 'dos_new': return (b.date_of_surgery || '').localeCompare(a.date_of_surgery || '');
         case 'dos_old': return (a.date_of_surgery || '').localeCompare(b.date_of_surgery || '');
@@ -227,6 +230,9 @@ function PatientCard({ patient, onPress }: { patient: Patient; onPress: () => vo
     >
       <View style={styles.cardLeft}>
         <Text numberOfLines={1} style={[styles.cardName, { color: colors.onSurface }]}>{patient.name}</Text>
+        {!!patient.diagnosis && (
+          <Text numberOfLines={1} style={[styles.cardDiagnosis, { color: colors.brand }]}>{patient.diagnosis}</Text>
+        )}
         <View style={styles.cardMetaRow}>
           <Text style={[styles.cardMeta, { color: colors.muted }]}>{patient.age}y • {patient.sex}</Text>
           <View style={[styles.dot, { backgroundColor: colors.borderStrong }]} />
@@ -290,6 +296,7 @@ const styles = StyleSheet.create({
   card: { flexDirection: 'row', padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, gap: spacing.md },
   cardLeft: { flex: 1, justifyContent: 'space-between' },
   cardName: { fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
+  cardDiagnosis: { fontSize: 13, fontWeight: '600', marginTop: 2 },
   cardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   cardMeta: { fontSize: 13 },
   dot: { width: 3, height: 3, borderRadius: 999 },

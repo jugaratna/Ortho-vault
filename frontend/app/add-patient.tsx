@@ -37,6 +37,7 @@ export default function AddPatient() {
   const [sex, setSex] = useState<Sex>('Male');
   const [countryCode, setCountryCode] = useState('+91');
   const [mobile, setMobile] = useState('');
+  const [diagnosis, setDiagnosis] = useState('');
   const [history, setHistory] = useState('');
   const [result, setResult] = useState('');
   const [dos, setDos] = useState<Date | null>(null);
@@ -50,7 +51,7 @@ export default function AddPatient() {
       api.getPatient(id).then((p) => {
         setName(p.name); setAge(String(p.age)); setSex(p.sex);
         setCountryCode(p.country_code || '+91');
-        setMobile(p.mobile); setHistory(p.history || '');
+        setMobile(p.mobile); setDiagnosis(p.diagnosis || ''); setHistory(p.history || '');
         setResult(p.result || '');
         setDos(p.date_of_surgery ? new Date(p.date_of_surgery) : null);
         setPreOp(p.pre_op || []); setPostOp(p.post_op || []); setVideos(p.videos || []);
@@ -130,6 +131,7 @@ export default function AddPatient() {
         sex,
         country_code: countryCode,
         mobile: mobile.trim(),
+        diagnosis: diagnosis.trim(),
         history,
         result,
         date_of_surgery: dos ? dos.toISOString().slice(0, 10) : null,
@@ -187,6 +189,9 @@ export default function AddPatient() {
         </Section>
 
         <Section title="History & Surgery" colors={colors}>
+          <Field label="Diagnosis">
+            <TextInput testID="input-diagnosis" value={diagnosis} onChangeText={setDiagnosis} placeholder="e.g. Osteoarthritis - Left Knee (Grade IV)" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
+          </Field>
           <Field label="Chief Complaints / History">
             <TextInput testID="input-history" value={history} onChangeText={setHistory} multiline placeholder="Presenting complaints, examination findings, diagnosis" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
           </Field>

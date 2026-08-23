@@ -100,6 +100,7 @@ class Patient(BaseModel):
     sex: str  # Male | Female | Other
     mobile: str
     country_code: str = "+91"
+    diagnosis: str = ""
     history: str = ""
     date_of_surgery: Optional[str] = None  # ISO YYYY-MM-DD
     result: str = ""
@@ -117,6 +118,7 @@ class PatientUpsert(BaseModel):
     sex: str
     mobile: str
     country_code: str = "+91"
+    diagnosis: str = ""
     history: str = ""
     date_of_surgery: Optional[str] = None
     result: str = ""

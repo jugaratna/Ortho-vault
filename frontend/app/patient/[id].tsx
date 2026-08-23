@@ -9,6 +9,7 @@ import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { api, fileUrl, MediaFile, Patient } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
+import { exportPatientPdf } from '@/src/utils/export-pdf';
 
 type Tab = 'demographics' | 'history' | 'comparison' | 'results' | 'video';
 
@@ -31,6 +32,16 @@ export default function PatientDetail() {
     router.back();
   };
 
+  const onExport = async () => {
+    if (!patient) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      await exportPatientPdf(patient);
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
   if (loading || !patient) {
     return <View style={[styles.center, { backgroundColor: colors.surface }]}><ActivityIndicator color={colors.brand} /></View>;
   }
@@ -51,6 +62,9 @@ export default function PatientDetail() {
             <Ionicons name="chevron-back" size={24} color={colors.onSurface} />
           </Pressable>
           <View style={{ flexDirection: 'row', gap: 4 }}>
+            <Pressable testID="export-patient-btn" onPress={onExport} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
+              <Ionicons name="share-outline" size={20} color={colors.onSurface} />
+            </Pressable>
             <Pressable testID="edit-patient-btn" onPress={() => router.push({ pathname: '/add-patient', params: { id: patient.id } })} style={[styles.iconBtn, { backgroundColor: colors.surfaceTertiary }]}>
               <Ionicons name="create-outline" size={20} color={colors.onSurface} />
             </Pressable>
@@ -120,6 +134,7 @@ function DemographicsTab({ patient }: { patient: Patient }) {
       <InfoRow label="Age" value={`${patient.age} years`} />
       <InfoRow label="Sex" value={patient.sex} />
       <InfoRow label="Mobile" value={`${patient.country_code} ${patient.mobile}`} />
+      <InfoRow label="Diagnosis" value={patient.diagnosis || 'Not set'} />
       <InfoRow label="Date of Surgery" value={patient.date_of_surgery || 'Not set'} />
     </View>
   );
@@ -128,11 +143,19 @@ function DemographicsTab({ patient }: { patient: Patient }) {
 function HistoryTab({ patient }: { patient: Patient }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
-      <Text style={[styles.sectionLabel, { color: colors.muted }]}>CHIEF COMPLAINTS & HISTORY</Text>
-      <Text style={{ color: colors.onSurface, fontSize: 15, lineHeight: 22 }}>
-        {patient.history || 'No history recorded.'}
-      </Text>
+    <View style={{ gap: spacing.md }}>
+      {!!patient.diagnosis && (
+        <View style={[styles.card, { backgroundColor: colors.brandTertiary, borderColor: colors.brand, padding: spacing.lg }]}>
+          <Text style={[styles.sectionLabel, { color: colors.onBrandTertiary }]}>DIAGNOSIS</Text>
+          <Text style={{ color: colors.onBrandTertiary, fontSize: 16, fontWeight: '700' }}>{patient.diagnosis}</Text>
+        </View>
+      )}
+      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
+        <Text style={[styles.sectionLabel, { color: colors.muted }]}>CHIEF COMPLAINTS & HISTORY</Text>
+        <Text style={{ color: colors.onSurface, fontSize: 15, lineHeight: 22 }}>
+          {patient.history || 'No history recorded.'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -157,9 +180,22 @@ function ComparisonTab({ patient }: { patient: Patient }) {
 
   const preImg = pre.find((f) => f.kind === 'image');
   const postImg = post.find((f) => f.kind === 'image');
+  const canSlider = !!preImg && !!postImg;
 
   return (
     <View style={{ gap: spacing.lg }}>
+      {canSlider && (
+        <Pressable
+          testID="open-compare-slider"
+          onPress={() => router.push({ pathname: '/compare-slider', params: { pre: preImg!.storage_path, post: postImg!.storage_path, preName: preImg!.name, postName: postImg!.name } })}
+          style={({ pressed }) => [styles.sliderCta, { backgroundColor: colors.brandPrimary, opacity: pressed ? 0.85 : 1 }]}
+        >
+          <Ionicons name="swap-horizontal" size={18} color={colors.onBrandPrimary} />
+          <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 14 }}>Open Alignment Slider</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.onBrandPrimary} />
+        </Pressable>
+      )}
+
       <View style={[styles.compareCard, { backgroundColor: '#000' }]}>
         <View style={{ flex: 1 }}>
           <View style={styles.compareLabelWrap}>
@@ -220,6 +256,7 @@ function MediaList({ title, files }: { title: string; files: MediaFile[] }) {
               testID={`media-${f.id}`}
               onPress={() => {
                 if (f.kind === 'image') router.push({ pathname: '/media-viewer', params: { path: f.storage_path, name: f.name } });
+                else if (f.kind === 'pdf' || f.kind === 'doc') router.push({ pathname: '/pdf-viewer', params: { path: f.storage_path, name: f.name } });
                 else WebBrowser.openBrowserAsync(fileUrl(f.storage_path));
               }}
               style={[styles.gridItem, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
@@ -296,4 +333,5 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   gridItem: { width: 100, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   gridImg: { width: '100%', height: 80 },
+  sliderCta: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: radius.md, justifyContent: 'center' },
 });
