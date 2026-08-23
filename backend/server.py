@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from emergentintegrations.llm.openai.speech_to_text import OpenAISpeechToText
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 
 ROOT_DIR = Path(__file__).parent
@@ -349,6 +350,54 @@ async def transcribe_audio(file: UploadFile = File(...)):
         raise HTTPException(status_code=502, detail="Transcription failed")
 
     return {"text": text}
+
+
+class DraftDischargeIn(BaseModel):
+    name: str = ""
+    age: int = 0
+    sex: str = ""
+    diagnosis: str = ""
+    date_of_surgery: Optional[str] = None
+    operative_note: str = ""
+    result: str = ""
+
+
+@api_router.post("/ai/draft-discharge")
+async def draft_discharge(payload: DraftDischargeIn):
+    if not EMERGENT_KEY:
+        raise HTTPException(status_code=500, detail="LLM key missing")
+    if not (payload.operative_note.strip() or payload.result.strip()):
+        raise HTTPException(status_code=400, detail="Need an operative note or result to draft from")
+
+    system = (
+        "You are a senior orthopedic surgeon writing a concise, structured DISCHARGE SUMMARY "
+        "for a hospital record. Use clear clinical headings in ALL CAPS on their own line. "
+        "Return plain text only (no markdown). Keep it factual — do not invent details not in the input. "
+        "If a field cannot be inferred, write '__' as a placeholder for the surgeon to fill in. "
+        "Include sections: Admission/Surgery/Discharge dates, Pre-op Diagnosis, Procedure Performed & Implants, "
+        "Hospital Course, ROM at Discharge, Wound Status, Weight Bearing, Physiotherapy Protocol, "
+        "Discharge Medications (antibiotic, analgesic, DVT prophylaxis), Follow-up Plan, Red-flag Signs Advised, "
+        "and a Signature line."
+    )
+
+    context = (
+        f"PATIENT: {payload.name}, {payload.age}y {payload.sex}\n"
+        f"DIAGNOSIS: {payload.diagnosis or '—'}\n"
+        f"DATE OF SURGERY: {payload.date_of_surgery or '—'}\n\n"
+        f"OPERATIVE NOTE:\n{payload.operative_note or '(not recorded)'}\n\n"
+        f"OUTCOME / RESULT:\n{payload.result or '(not recorded)'}\n\n"
+        f"Draft the discharge summary now."
+    )
+
+    try:
+        chat = LlmChat(api_key=EMERGENT_KEY, session_id=f"discharge-{uuid.uuid4()}", system_message=system)
+        chat = chat.with_model("openai", "gpt-4o-mini")
+        draft = await chat.send_message(UserMessage(text=context))
+    except Exception as e:
+        logger.warning(f"Discharge draft failed: {e}")
+        raise HTTPException(status_code=502, detail="AI draft failed")
+
+    return {"draft": (draft or "").strip()}
 
 
 app.include_router(api_router)

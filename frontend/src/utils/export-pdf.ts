@@ -144,6 +144,30 @@ export async function exportPatientNotesPdf(patient: Patient) {
   return shareOrPrint(html, `${patient.name} - Notes`);
 }
 
+export async function exportOperativeNotePdf(patient: Patient) {
+  const body = `
+    <h1>${esc(patient.name)} — Operative Note</h1>
+    <div class="meta">${patient.age}y • ${esc(patient.sex)} • ${esc(patient.diagnosis || 'No diagnosis')} • ${esc(patient.date_of_surgery || 'No DOS')}</div>
+
+    <h2>Operative Note</h2>
+    <div class="note">${esc((patient as any).operative_note || 'No operative note recorded.')}</div>
+  `;
+  const html = wrap(body, 'Operative Note', `Operative Note • ${new Date().toLocaleDateString()}`);
+  return shareOrPrint(html, `${patient.name} - Operative Note`);
+}
+
+export async function exportDischargeNotePdf(patient: Patient) {
+  const body = `
+    <h1>${esc(patient.name)} — Discharge Summary</h1>
+    <div class="meta">${patient.age}y • ${esc(patient.sex)} • ${esc(patient.diagnosis || 'No diagnosis')} • ${esc(patient.date_of_surgery || 'No DOS')}</div>
+
+    <h2>Discharge Note</h2>
+    <div class="note">${esc((patient as any).discharge_note || 'No discharge note recorded.')}</div>
+  `;
+  const html = wrap(body, 'Discharge Summary', `Discharge Summary • ${new Date().toLocaleDateString()}`);
+  return shareOrPrint(html, `${patient.name} - Discharge Summary`);
+}
+
 // ---- Download a single media file ----
 export async function downloadMediaFile(file: MediaFile) {
   const url = fileUrl(file.storage_path);

@@ -62,6 +62,9 @@ export default function AddPatient() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [templateTarget, setTemplateTarget] = useState<'result' | 'operative_note' | 'discharge_note'>('result');
   const { items: customTemplates, refresh: refreshCustom } = useCustomTemplates();
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiDraft, setAiDraft] = useState<string | null>(null);
+  const [aiError, setAiError] = useState('');
 
   useEffect(() => {
     if (showTemplates) refreshCustom();
@@ -195,6 +198,36 @@ export default function AddPatient() {
   const openTemplateFor = (target: 'result' | 'operative_note' | 'discharge_note') => {
     setTemplateTarget(target);
     setShowTemplates(true);
+  };
+
+  const draftDischargeWithAI = async () => {
+    if (!operativeNote.trim() && !result.trim()) {
+      setAiError('Fill Operative Note or Result first so the AI has something to draft from.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      return;
+    }
+    setAiError('');
+    setAiBusy(true);
+    try {
+      const draft = await api.draftDischarge({
+        name, age: Number(age) || 0, sex, diagnosis, date_of_surgery: dos ? dos.toISOString().slice(0, 10) : null,
+        operative_note: operativeNote, result,
+      });
+      setAiDraft(draft);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e: any) {
+      setAiError(e?.message || 'AI draft failed');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const acceptAiDraft = () => {
+    if (!aiDraft) return;
+    setDischargeNote((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + aiDraft);
+    setAiDraft(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const save = async () => {
@@ -383,7 +416,7 @@ export default function AddPatient() {
 
         <Section title="Discharge Note" colors={colors}>
           <Field label="Discharge Summary & Follow-up Plan">
-            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
               <Pressable
                 testID="open-template-discharge"
                 onPress={() => openTemplateFor('discharge_note')}
@@ -393,7 +426,21 @@ export default function AddPatient() {
                 <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Insert Template</Text>
                 <Ionicons name="chevron-down" size={12} color={colors.brand} />
               </Pressable>
+              <Pressable
+                testID="draft-discharge-ai"
+                onPress={draftDischargeWithAI}
+                disabled={aiBusy}
+                style={[styles.templateBtn, { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary, opacity: aiBusy ? 0.7 : 1 }]}
+              >
+                {aiBusy ? (
+                  <ActivityIndicator color={colors.onBrandPrimary} size="small" />
+                ) : (
+                  <Ionicons name="sparkles" size={14} color={colors.onBrandPrimary} />
+                )}
+                <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 12 }}>Draft with AI</Text>
+              </Pressable>
             </View>
+            {!!aiError && <Text style={{ color: colors.error, fontSize: 12, marginBottom: 6 }}>{aiError}</Text>}
             <TextInput
               testID="input-discharge-note"
               value={dischargeNote}
@@ -531,6 +578,51 @@ export default function AddPatient() {
                 </Pressable>
               ))}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* AI Draft review modal */}
+      <Modal visible={!!aiDraft} transparent animationType="slide" onRequestClose={() => setAiDraft(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.lg, maxHeight: '85%' }]}>
+            <View style={styles.modalHead}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="sparkles" size={18} color={colors.brand} />
+                  <Text style={[styles.modalTitle, { color: colors.onSurface }]}>AI Discharge Draft</Text>
+                </View>
+                <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>Review, edit if needed, then accept to insert into the Discharge Note</Text>
+              </View>
+              <Pressable testID="ai-draft-close" onPress={() => setAiDraft(null)}>
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <ScrollView style={{ maxHeight: 460, marginTop: spacing.sm }}>
+              <TextInput
+                testID="ai-draft-textarea"
+                value={aiDraft || ''}
+                onChangeText={(t) => setAiDraft(t)}
+                multiline
+                style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, minHeight: 320, fontSize: 13 }]}
+              />
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: spacing.md }}>
+              <Pressable
+                testID="ai-draft-discard"
+                onPress={() => setAiDraft(null)}
+                style={({ pressed }) => [styles.saveBtn, { flex: 1, backgroundColor: colors.surfaceTertiary, opacity: pressed ? 0.7 : 1 }]}
+              >
+                <Text style={{ color: colors.onSurface, fontWeight: '700', fontSize: 15 }}>Discard</Text>
+              </Pressable>
+              <Pressable
+                testID="ai-draft-accept"
+                onPress={acceptAiDraft}
+                style={({ pressed }) => [styles.saveBtn, { flex: 2, backgroundColor: colors.brandPrimary, opacity: pressed ? 0.85 : 1 }]}
+              >
+                <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 15 }}>Accept & Insert</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>

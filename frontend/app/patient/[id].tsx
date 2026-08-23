@@ -9,7 +9,7 @@ import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { api, fileUrl, MediaFile, Patient } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
-import { exportPatientPdf, exportPatientNotesPdf, downloadMediaFile } from '@/src/utils/export-pdf';
+import { exportPatientPdf, exportPatientNotesPdf, downloadMediaFile, exportOperativeNotePdf, exportDischargeNotePdf } from '@/src/utils/export-pdf';
 
 type Tab = 'demographics' | 'history' | 'comparison' | 'results' | 'video' | 'timeline';
 
@@ -176,6 +176,10 @@ function ResultsTab({ patient }: { patient: Patient }) {
       <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
         <View style={styles.notesHead}>
           <Text style={[styles.sectionLabel, { color: colors.muted }]}>OPERATIVE NOTE</Text>
+          <Pressable testID="download-op-note-btn" onPress={() => exportOperativeNotePdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
+            <Ionicons name="download-outline" size={13} color={colors.brand} />
+            <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Op Note PDF</Text>
+          </Pressable>
         </View>
         <Text style={{ color: colors.onSurface, fontSize: 14, lineHeight: 21 }}>
           {(patient as any).operative_note || 'No operative note recorded.'}
@@ -185,6 +189,10 @@ function ResultsTab({ patient }: { patient: Patient }) {
       <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
         <View style={styles.notesHead}>
           <Text style={[styles.sectionLabel, { color: colors.muted }]}>DISCHARGE NOTE</Text>
+          <Pressable testID="download-discharge-btn" onPress={() => exportDischargeNotePdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
+            <Ionicons name="download-outline" size={13} color={colors.brand} />
+            <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Discharge PDF</Text>
+          </Pressable>
         </View>
         <Text style={{ color: colors.onSurface, fontSize: 14, lineHeight: 21 }}>
           {(patient as any).discharge_note || 'No discharge note recorded.'}

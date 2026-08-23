@@ -87,4 +87,14 @@ export const api = {
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form });
     return json<{ storage_path: string; size: number; name: string; mime: string; kind: MediaKind }>(res);
   },
+
+  async draftDischarge(input: { name: string; age: number; sex: string; diagnosis: string; date_of_surgery: string | null; operative_note: string; result: string }): Promise<string> {
+    const res = await fetch(`${API_BASE}/ai/draft-discharge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await json<{ draft: string }>(res);
+    return data.draft;
+  },
 };
