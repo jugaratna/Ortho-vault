@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useTheme, spacing, radius, ThemeMode } from '@/src/theme';
 import { useSettings, FollowupDays } from '@/src/settings';
+import { useAuth } from '@/src/auth';
 import { useGoogleDriveAuth, isDriveConfigured } from '@/src/utils/google-auth';
 import { backupToDrive, listBackupFolders, restoreFromDrive, BackupFolder } from '@/src/utils/drive';
 
@@ -16,6 +17,7 @@ export default function Settings() {
   const drive = useGoogleDriveAuth();
   const configured = isDriveConfigured();
   const { followupDays, setFollowupDays } = useSettings();
+  const { user, logout } = useAuth();
   const [busy, setBusy] = useState<null | 'backup' | 'restore-list' | 'restore'>(null);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [progressMsg, setProgressMsg] = useState('');
@@ -80,6 +82,21 @@ export default function Settings() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.xl, paddingBottom: 40 }}>
+        {user && (
+          <View style={[styles.row, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, marginBottom: 0 }]}>
+            <View style={[styles.avatar, { backgroundColor: colors.brandTertiary }]}>
+              <Ionicons name="person" size={22} color={colors.brand} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowLabel, { color: colors.onSurface }]} numberOfLines={1}>{user.name || user.email}</Text>
+              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>{user.email} • {user.role}</Text>
+            </View>
+            <Pressable testID="logout-btn" onPress={logout} style={[styles.badgeOn, { backgroundColor: colors.error }]}>
+              <Text style={{ color: colors.onError, fontSize: 11, fontWeight: '700' }}>LOG OUT</Text>
+            </Pressable>
+          </View>
+        )}
+
         <Section title="Appearance" colors={colors}>
           <View style={{ gap: spacing.sm }}>
             {modes.map((m) => (
@@ -288,4 +305,5 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 17, fontWeight: '700' },
   folderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.sm },
   dayChip: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
+  avatar: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
 });

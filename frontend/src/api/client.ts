@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { getAuthToken } from '@/src/auth';
 
 export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 export const API_BASE = `${BACKEND_URL}/api`;
@@ -40,7 +41,14 @@ export type Patient = {
 };
 
 export function fileUrl(storagePath: string) {
-  return `${API_BASE}/files/${storagePath}`;
+  const t = getAuthToken();
+  const suffix = t ? `?token=${encodeURIComponent(t)}` : '';
+  return `${API_BASE}/files/${storagePath}${suffix}`;
+}
+
+function authHeaders(): Record<string, string> {
+  const t = getAuthToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -53,26 +61,26 @@ async function json<T>(res: Response): Promise<T> {
 
 export const api = {
   async listPatients(): Promise<Patient[]> {
-    const res = await fetch(`${API_BASE}/patients`);
+    const res = await fetch(`${API_BASE}/patients`, { headers: authHeaders() });
     return json<Patient[]>(res);
   },
 
   async getPatient(id: string): Promise<Patient> {
-    const res = await fetch(`${API_BASE}/patients/${id}`);
+    const res = await fetch(`${API_BASE}/patients/${id}`, { headers: authHeaders() });
     return json<Patient>(res);
   },
 
   async upsertPatient(p: Partial<Patient>): Promise<Patient> {
     const res = await fetch(`${API_BASE}/patients`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(p),
     });
     return json<Patient>(res);
   },
 
   async deletePatient(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/patients/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/patients/${id}`, { method: 'DELETE', headers: authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   },
 
@@ -84,14 +92,14 @@ export const api = {
     } else {
       form.append('file', { uri, name, type: mime } as any);
     }
-    const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form });
+    const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form, headers: authHeaders() });
     return json<{ storage_path: string; size: number; name: string; mime: string; kind: MediaKind }>(res);
   },
 
   async draftDischarge(input: { name: string; age: number; sex: string; diagnosis: string; date_of_surgery: string | null; operative_note: string; result: string }): Promise<string> {
     const res = await fetch(`${API_BASE}/ai/draft-discharge`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(input),
     });
     const data = await json<{ draft: string }>(res);

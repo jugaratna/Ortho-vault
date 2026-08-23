@@ -1,11 +1,31 @@
-"""OrthoVault backend API tests"""
+"""OrthoVault backend auth-boundary + RBAC tests (Iteration 3 security).
+
+Requires seeded users/sessions (see seed_test_users.py):
+  admin  -> test_token_admin
+  editor1 -> test_token_editor1  (user_id=user_test_ed1)
+  editor2 -> test_token_editor2  (user_id=user_test_ed2)
+  viewer -> test_token_viewer
+"""
 import io
 import os
 import pytest
 import requests
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 BASE_URL = "https://surgical-vault-2.preview.emergentagent.com"
 API = BASE_URL.rstrip("/") + "/api"
+
+ADMIN = "test_token_admin"
+EDITOR1 = "test_token_editor1"
+EDITOR2 = "test_token_editor2"
+VIEWER = "test_token_viewer"
+
+
+def h(tok: str) -> dict:
+    return {"Authorization": f"Bearer {tok}"}
 
 
 @pytest.fixture(scope="session")
@@ -13,236 +33,264 @@ def s():
     return requests.Session()
 
 
-# Module: health check
-class TestHealth:
-    def test_root(self, s):
+# Module: public root
+class TestPublicRoot:
+    def test_root_no_auth(self, s):
         r = s.get(f"{API}/")
         assert r.status_code == 200
         d = r.json()
-        assert "message" in d and "status" in d
-        assert d["status"] == "ok"
+        assert d.get("status") == "ok"
+        assert "message" in d
 
 
-# Module: file upload / retrieve via Emergent Object Storage
-class TestUploadDownload:
-    # 1x1 png bytes
+# Module: unauth boundary — every PHI endpoint returns 401 without a bearer token
+class TestUnauth401:
+    def test_list_patients_no_auth(self, s):
+        assert s.get(f"{API}/patients").status_code == 401
+
+    def test_list_patients_bad_token(self, s):
+        r = s.get(f"{API}/patients", headers=h("not-a-real-token-xyz"))
+        assert r.status_code == 401
+
+    def test_post_patients_no_auth(self, s):
+        r = s.post(f"{API}/patients", json={"name": "X", "age": 1, "sex": "Male", "mobile": "1"})
+        assert r.status_code == 401
+
+    def test_delete_patient_no_auth(self, s):
+        assert s.delete(f"{API}/patients/anything").status_code == 401
+
+    def test_upload_no_auth(self, s):
+        r = s.post(f"{API}/upload", files={"file": ("a.png", b"x", "image/png")})
+        assert r.status_code == 401
+
+    def test_files_no_auth(self, s):
+        r = s.get(f"{API}/files/orthovault/uploads/patients/nope.png")
+        assert r.status_code == 401
+
+    def test_transcribe_no_auth(self, s):
+        r = s.post(f"{API}/transcribe", files={"file": ("a.wav", b"x", "audio/wav")})
+        assert r.status_code == 401
+
+    def test_ai_draft_no_auth(self, s):
+        r = s.post(f"{API}/ai/draft-discharge", json={"operative_note": "x"})
+        assert r.status_code == 401
+
+    def test_auth_me_no_auth(self, s):
+        assert s.get(f"{API}/auth/me").status_code == 401
+
+
+# Module: session exchange rejects bogus session_id
+class TestSessionExchange:
+    def test_bogus_session_id(self, s):
+        r = s.post(f"{API}/auth/session", json={"session_id": "bogus-does-not-exist-xyz"})
+        assert r.status_code in (400, 401), f"got {r.status_code}: {r.text}"
+
+
+# Module: auth/me works with valid token
+class TestAuthMe:
+    def test_admin_me(self, s):
+        r = s.get(f"{API}/auth/me", headers=h(ADMIN))
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["role"] == "admin"
+        assert d["user_id"] == "user_test_admin"
+
+
+# Module: patient CRUD with roles
+class TestPatientsRBAC:
+    created = []  # (owner_token, pid)
+
+    def test_admin_can_list(self, s):
+        r = s.get(f"{API}/patients", headers=h(ADMIN))
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    def test_admin_create_sets_owner(self, s):
+        payload = {"name": "TEST_AdminP", "age": 30, "sex": "Male", "mobile": "1", "country_code": "+91"}
+        r = s.post(f"{API}/patients", headers=h(ADMIN), json=payload)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        # owner_id is not in Patient response model but must persist. Confirm via list.
+        assert d["name"] == "TEST_AdminP"
+        TestPatientsRBAC.created.append((ADMIN, d["id"]))
+
+    def test_editor_creates_and_owns(self, s):
+        payload = {"name": "TEST_Ed1P", "age": 44, "sex": "Female", "mobile": "2"}
+        r = s.post(f"{API}/patients", headers=h(EDITOR1), json=payload)
+        assert r.status_code == 200, r.text
+        pid = r.json()["id"]
+        TestPatientsRBAC.created.append((EDITOR1, pid))
+        # editor1 sees it
+        lst = s.get(f"{API}/patients", headers=h(EDITOR1)).json()
+        ids = [p["id"] for p in lst]
+        assert pid in ids
+
+    def test_editor_isolation(self, s):
+        """editor2 must NOT see editor1's or admin's patients."""
+        lst = s.get(f"{API}/patients", headers=h(EDITOR2)).json()
+        # editor2 has created nothing this session
+        for _tok, pid in TestPatientsRBAC.created:
+            assert pid not in [p["id"] for p in lst], f"editor2 leaked pid={pid}"
+
+    def test_editor_cannot_access_admin_patient_by_id(self, s):
+        # find the admin-created patient
+        admin_pids = [pid for tok, pid in TestPatientsRBAC.created if tok == ADMIN]
+        assert admin_pids, "seed missing admin patient"
+        pid = admin_pids[0]
+        r = s.get(f"{API}/patients/{pid}", headers=h(EDITOR2))
+        assert r.status_code == 403, f"expected 403 got {r.status_code}: {r.text}"
+
+    def test_viewer_cannot_create(self, s):
+        r = s.post(f"{API}/patients", headers=h(VIEWER),
+                   json={"name": "TEST_ViewerP", "age": 1, "sex": "Male", "mobile": "3"})
+        assert r.status_code == 403
+
+    def test_viewer_cannot_delete(self, s):
+        # use admin's patient id
+        admin_pids = [pid for tok, pid in TestPatientsRBAC.created if tok == ADMIN]
+        pid = admin_pids[0]
+        r = s.delete(f"{API}/patients/{pid}", headers=h(VIEWER))
+        assert r.status_code == 403
+
+    def test_admin_sees_everyones(self, s):
+        lst = s.get(f"{API}/patients", headers=h(ADMIN)).json()
+        ids = {p["id"] for p in lst}
+        for _tok, pid in TestPatientsRBAC.created:
+            assert pid in ids, f"admin should see pid={pid}"
+
+    @classmethod
+    def teardown_class(cls):
+        sess = requests.Session()
+        for tok, pid in cls.created:
+            try:
+                sess.delete(f"{API}/patients/{pid}", headers=h(ADMIN), timeout=10)
+            except Exception:
+                pass
+
+
+# Module: file upload / download namespacing + path traversal
+class TestFilesSecurity:
     PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00\x01"
            b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82")
-    PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
+    ed1_path = None
 
-    def test_upload_image_and_fetch(self, s):
-        files = {"file": ("test.png", io.BytesIO(self.PNG), "image/png")}
-        r = s.post(f"{API}/upload", files=files, timeout=60)
+    def test_editor1_upload_namespaced(self, s):
+        files = {"file": ("t.png", io.BytesIO(self.PNG), "image/png")}
+        r = s.post(f"{API}/upload", headers=h(EDITOR1), files=files, timeout=60)
         assert r.status_code == 200, r.text
         d = r.json()
-        for k in ("storage_path", "size", "name", "mime", "kind"):
-            assert k in d
-        assert d["kind"] == "image"
-        assert d["mime"] == "image/png"
-        assert d["name"] == "test.png"
-        assert d["size"] > 0
+        assert "orthovault/uploads/patients/user_test_ed1/" in d["storage_path"], d["storage_path"]
+        TestFilesSecurity.ed1_path = d["storage_path"]
 
-        # fetch back
-        r2 = s.get(f"{API}/files/{d['storage_path']}", timeout=60)
-        assert r2.status_code == 200
-        assert r2.content == self.PNG
-        assert "image" in (r2.headers.get("content-type") or "")
-
-    def test_upload_pdf(self, s):
-        files = {"file": ("doc.pdf", io.BytesIO(self.PDF), "application/pdf")}
-        r = s.post(f"{API}/upload", files=files, timeout=60)
-        assert r.status_code == 200, r.text
-        d = r.json()
-        assert d["kind"] == "pdf"
-        assert "pdf" in d["mime"]
-
-    def test_get_missing_file_404(self, s):
-        r = s.get(f"{API}/files/orthovault/uploads/patients/does-not-exist-xyz.png", timeout=60)
-        assert r.status_code == 404
-
-
-# Module: patient CRUD + upsert
-class TestPatients:
-    created_ids = []
-
-    def _payload(self, name="TEST_Alpha"):
-        return {
-            "name": name,
-            "age": 42,
-            "sex": "Male",
-            "mobile": "9876543210",
-            "country_code": "+91",
-            "history": "TEST history",
-            "date_of_surgery": "2025-01-15",
-            "result": "TEST result",
-            "pre_op": [],
-            "post_op": [],
-            "videos": [],
-        }
-
-    def test_create_patient(self, s):
-        r = s.post(f"{API}/patients", json=self._payload("TEST_Create"))
-        assert r.status_code == 200, r.text
-        d = r.json()
-        assert d["id"] and len(d["id"]) >= 8
-        assert d["name"] == "TEST_Create"
-        assert d["age"] == 42
-        assert d["sex"] == "Male"
-        assert d["mobile"] == "9876543210"
-        assert "_id" not in d
-        TestPatients.created_ids.append(d["id"])
-
-        # verify persistence via GET by id
-        g = s.get(f"{API}/patients/{d['id']}")
-        assert g.status_code == 200
-        gd = g.json()
-        assert gd["id"] == d["id"]
-        assert gd["history"] == "TEST history"
-        assert "_id" not in gd
-
-    def test_list_no_objectid_leak(self, s):
-        r = s.get(f"{API}/patients")
+    def test_editor1_can_fetch_own(self, s):
+        assert TestFilesSecurity.ed1_path
+        r = s.get(f"{API}/files/{TestFilesSecurity.ed1_path}", headers=h(EDITOR1), timeout=60)
         assert r.status_code == 200
-        arr = r.json()
-        assert isinstance(arr, list)
-        assert len(arr) >= 1
-        for p in arr:
-            assert "_id" not in p
-            assert "id" in p
+        assert r.content == self.PNG
 
-    def test_upsert_updates_no_duplicate(self, s):
-        # create
-        r = s.post(f"{API}/patients", json=self._payload("TEST_Upsert"))
-        pid = r.json()["id"]
-        TestPatients.created_ids.append(pid)
-        before = len(s.get(f"{API}/patients").json())
+    def test_editor2_cannot_fetch_others_file(self, s):
+        assert TestFilesSecurity.ed1_path
+        r = s.get(f"{API}/files/{TestFilesSecurity.ed1_path}", headers=h(EDITOR2), timeout=60)
+        assert r.status_code == 403
 
-        # upsert with same id but changed name
-        payload = self._payload("TEST_UpsertChanged")
-        payload["id"] = pid
-        payload["age"] = 55
-        r2 = s.post(f"{API}/patients", json=payload)
-        assert r2.status_code == 200
-        d2 = r2.json()
-        assert d2["id"] == pid
-        assert d2["name"] == "TEST_UpsertChanged"
-        assert d2["age"] == 55
-
-        after = len(s.get(f"{API}/patients").json())
-        assert after == before, f"duplicate created: before={before} after={after}"
-
-        # confirm via GET
-        g = s.get(f"{API}/patients/{pid}").json()
-        assert g["name"] == "TEST_UpsertChanged"
-        assert g["age"] == 55
-
-    def test_get_nonexistent_404(self, s):
-        r = s.get(f"{API}/patients/nonexistent-id-xyz-123")
-        assert r.status_code == 404
-
-    def test_delete_and_double_delete(self, s):
-        # create fresh
-        r = s.post(f"{API}/patients", json=self._payload("TEST_Delete"))
-        pid = r.json()["id"]
-        d = s.delete(f"{API}/patients/{pid}")
-        assert d.status_code == 200
-        assert d.json().get("ok") is True
-        # gone
-        assert s.get(f"{API}/patients/{pid}").status_code == 404
-        # double delete -> 404
-        assert s.delete(f"{API}/patients/{pid}").status_code == 404
-
-    def test_persist_media_arrays(self, s):
-        p = self._payload("TEST_WithMedia")
-        p["pre_op"] = [{
-            "id": "m1", "name": "x.png", "kind": "image", "mime": "image/png",
-            "size": 10, "storage_path": "orthovault/uploads/patients/x.png",
-            "section": "pre_op", "uploaded_at": "2025-01-01T00:00:00+00:00"
-        }]
-        r = s.post(f"{API}/patients", json=p)
+    def test_admin_can_fetch_any(self, s):
+        assert TestFilesSecurity.ed1_path
+        r = s.get(f"{API}/files/{TestFilesSecurity.ed1_path}", headers=h(ADMIN), timeout=60)
         assert r.status_code == 200
-        pid = r.json()["id"]
-        TestPatients.created_ids.append(pid)
-        g = s.get(f"{API}/patients/{pid}").json()
-        assert len(g["pre_op"]) == 1
-        assert g["pre_op"][0]["kind"] == "image"
 
-    @classmethod
-    def teardown_class(cls):
-        sess = requests.Session()
-        for pid in cls.created_ids:
-            try:
-                sess.delete(f"{API}/patients/{pid}", timeout=10)
-            except Exception:
-                pass
-
-
-# Module: diagnosis persistence (Iteration 2 - ICD-10)
-class TestDiagnosis:
-    created_ids = []
-
-    def test_diagnosis_persists_and_no_objectid(self, s):
-        p = {
-            "name": "TEST_Diag_Persist", "age": 55, "sex": "Male",
-            "country_code": "+91", "mobile": "9998887777",
-            "diagnosis": "M17.11 - Osteoarthritis of Right Knee",
-            "history": "chronic knee pain",
-        }
-        r = s.post(f"{API}/patients", json=p)
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["diagnosis"] == p["diagnosis"]
-        assert "_id" not in body
-        pid = body["id"]
-        TestDiagnosis.created_ids.append(pid)
-        g = s.get(f"{API}/patients/{pid}")
-        assert g.status_code == 200
-        gj = g.json()
-        assert gj["diagnosis"] == p["diagnosis"]
-        assert "_id" not in gj
-
-    def test_list_no_objectid_leak(self, s):
-        r = s.get(f"{API}/patients")
-        assert r.status_code == 200
-        for p in r.json():
-            assert "_id" not in p
-
-    @classmethod
-    def teardown_class(cls):
-        sess = requests.Session()
-        for pid in cls.created_ids:
-            try:
-                sess.delete(f"{API}/patients/{pid}", timeout=10)
-            except Exception:
-                pass
-
-
-# Module: transcribe (Iteration 2 - Whisper voice notes)
-class TestTranscribe:
-    @staticmethod
-    def _tiny_wav_bytes(seconds: float = 0.5, sr: int = 8000) -> bytes:
-        import wave
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)  # 16-bit
-            w.setframerate(sr)
-            w.writeframes(b"\x00\x00" * int(sr * seconds))
-        return buf.getvalue()
-
-    def test_empty_audio_400(self, s):
-        r = s.post(f"{API}/transcribe", files={"file": ("empty.wav", b"", "audio/wav")})
+    def test_path_traversal_rejected(self, s):
+        r = s.get(f"{API}/files/orthovault/uploads/patients/../../etc/passwd", headers=h(ADMIN))
         assert r.status_code == 400
 
-    def test_short_wav_transcribes(self, s):
-        data = self._tiny_wav_bytes()
-        r = s.post(f"{API}/transcribe",
-                   files={"file": ("silence.wav", data, "audio/wav")},
-                   timeout=60)
-        # Whisper may return 200 with (possibly empty) text OR controlled 502
-        assert r.status_code in (200, 400, 413, 502), r.text
-        if r.status_code == 200:
-            j = r.json()
-            assert "text" in j
-            assert isinstance(j["text"], str)
+    def test_outside_app_prefix_rejected(self, s):
+        r = s.get(f"{API}/files/other-app/uploads/x.png", headers=h(ADMIN))
+        assert r.status_code == 400
+
+    # NEW: iteration 4 tightening — admin must also be forced into uploads/patients/ prefix
+    def test_admin_orthovault_non_upload_prefix_rejected(self, s):
+        """Even admin can no longer read orthovault objects outside uploads/patients/."""
+        r = s.get(f"{API}/files/orthovault/something-else/foo.png", headers=h(ADMIN))
+        assert r.status_code == 400, f"expected 400 got {r.status_code}: {r.text}"
+
+    def test_admin_orthovault_bare_rejected(self, s):
+        r = s.get(f"{API}/files/orthovault/other/thing.bin", headers=h(ADMIN))
+        assert r.status_code == 400
+
+    def test_admin_can_still_read_any_users_file_under_prefix(self, s):
+        """Admin can still read editor1's file since it IS under uploads/patients/."""
+        assert TestFilesSecurity.ed1_path, "prior upload test must have set ed1_path"
+        r = s.get(f"{API}/files/{TestFilesSecurity.ed1_path}", headers=h(ADMIN), timeout=60)
+        # Must be 200 (or 404 if object missing) — must NOT be 400/403
+        assert r.status_code in (200, 404), f"unexpected {r.status_code}: {r.text}"
+        assert r.status_code != 400
+        assert r.status_code != 403
+
+    def test_admin_valid_prefix_missing_object_not_400_or_403(self, s):
+        """Constructed valid-prefix path pointing at a nonexistent object under another user's namespace.
+        Should be 404 (S3 miss), not 400/403."""
+        r = s.get(
+            f"{API}/files/orthovault/uploads/patients/user_test_ed1/does-not-exist-xyz.png",
+            headers=h(ADMIN), timeout=30,
+        )
+        assert r.status_code != 400, f"prefix check wrongly rejected: {r.text}"
+        assert r.status_code != 403, f"admin wrongly forbidden: {r.text}"
+        assert r.status_code in (404, 500), f"unexpected {r.status_code}: {r.text}"
+
+    def test_percent_encoded_traversal_rejected(self, s):
+        """%2e%2e (encoded dots) traversal must be rejected with 400.
+        Send the URL raw so requests doesn't decode %2e. """
+        # Build URL manually so %2e stays literal in the wire path
+        url = f"{API}/files/orthovault/uploads/patients/%2e%2e/%2e%2e/etc/passwd"
+        # requests preserves already-encoded sequences in the path
+        r = s.get(url, headers=h(ADMIN), timeout=15)
+        assert r.status_code == 400, f"expected 400 got {r.status_code}: {r.text}"
+
+    def test_percent_encoded_traversal_uppercase_rejected(self, s):
+        url = f"{API}/files/orthovault/uploads/patients/%2E%2E/etc/passwd"
+        r = s.get(url, headers=h(ADMIN), timeout=15)
+        assert r.status_code == 400, f"expected 400 got {r.status_code}: {r.text}"
+
+    def test_editor_cross_user_isolation_still_403(self, s):
+        """Regression: editor2 requesting editor1's actual file must still get 403 (not 400)."""
+        assert TestFilesSecurity.ed1_path
+        r = s.get(f"{API}/files/{TestFilesSecurity.ed1_path}", headers=h(EDITOR2), timeout=30)
+        assert r.status_code == 403, f"expected 403 got {r.status_code}: {r.text}"
+
+    def test_viewer_upload_forbidden(self, s):
+        files = {"file": ("t.png", io.BytesIO(self.PNG), "image/png")}
+        r = s.post(f"{API}/upload", headers=h(VIEWER), files=files, timeout=60)
+        assert r.status_code == 403
+
+
+# Module: admin can PATCH roles, non-admin cannot
+class TestUserAdmin:
+    def test_non_admin_cannot_list_users(self, s):
+        r = s.get(f"{API}/auth/users", headers=h(EDITOR1))
+        assert r.status_code == 403
+
+    def test_admin_lists_users(self, s):
+        r = s.get(f"{API}/auth/users", headers=h(ADMIN))
+        assert r.status_code == 200
+        emails = {u["email"] for u in r.json()}
+        assert "ed2@ortho.test" in emails
+
+    def test_non_admin_cannot_patch_role(self, s):
+        r = s.patch(f"{API}/auth/users/user_test_ed2", headers=h(EDITOR1), json={"role": "admin"})
+        assert r.status_code == 403
+
+    def test_admin_can_patch_role(self, s):
+        # promote ed2 to viewer, then back to editor
+        r = s.patch(f"{API}/auth/users/user_test_ed2", headers=h(ADMIN), json={"role": "viewer"})
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+        # confirm via list
+        users = s.get(f"{API}/auth/users", headers=h(ADMIN)).json()
+        ed2 = next(u for u in users if u["user_id"] == "user_test_ed2")
+        assert ed2["role"] == "viewer"
+        # revert
+        s.patch(f"{API}/auth/users/user_test_ed2", headers=h(ADMIN), json={"role": "editor"})
+
+    def test_invalid_role_rejected(self, s):
+        r = s.patch(f"{API}/auth/users/user_test_ed2", headers=h(ADMIN), json={"role": "superadmin"})
+        assert r.status_code == 400

@@ -1,0 +1,64 @@
+import { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Image as RNImage } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Redirect } from 'expo-router';
+import { useAuth } from '@/src/auth';
+import { useTheme, spacing, radius } from '@/src/theme';
+
+export default function Login() {
+  const { user, loading, signInWithGoogle } = useAuth();
+  const { colors } = useTheme();
+  const [busy, setBusy] = useState(false);
+
+  if (loading) {
+    return <View style={[styles.center, { backgroundColor: colors.surface }]}><ActivityIndicator color={colors.brand} /></View>;
+  }
+  if (user) return <Redirect href="/dashboard" />;
+
+  const onSignIn = async () => {
+    setBusy(true);
+    try { await signInWithGoogle(); } finally { setBusy(false); }
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.surface }]}>
+      <View style={styles.inner}>
+        <View style={[styles.logoWrap, { backgroundColor: colors.brandTertiary }]}>
+          <Ionicons name="medkit" size={40} color={colors.brand} />
+        </View>
+        <Text style={[styles.title, { color: colors.onSurface }]}>OrthoVault</Text>
+        <Text style={[styles.sub, { color: colors.muted }]}>Secure patient records for orthopedic surgeons</Text>
+
+        <Pressable
+          testID="google-signin-btn"
+          onPress={onSignIn}
+          disabled={busy}
+          style={({ pressed }) => [styles.gBtn, { backgroundColor: colors.onSurface, opacity: pressed || busy ? 0.85 : 1 }]}
+        >
+          {busy ? <ActivityIndicator color={colors.surface} /> : (
+            <>
+              <Ionicons name="logo-google" size={20} color={colors.surface} />
+              <Text style={[styles.gTxt, { color: colors.surface }]}>Continue with Google</Text>
+            </>
+          )}
+        </Pressable>
+
+        <Text style={[styles.footer, { color: colors.muted }]}>
+          The first person to sign in becomes the clinic admin. Additional users default to editors and can be promoted from the Team screen.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  inner: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  logoWrap: { width: 84, height: 84, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg },
+  title: { fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },
+  sub: { fontSize: 14, marginTop: spacing.xs, marginBottom: spacing['2xl'], textAlign: 'center', paddingHorizontal: 20 },
+  gBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 14, paddingHorizontal: 22, borderRadius: radius.md, minWidth: 280 },
+  gTxt: { fontSize: 16, fontWeight: '700' },
+  footer: { marginTop: spacing['2xl'], fontSize: 12, textAlign: 'center', paddingHorizontal: 24, lineHeight: 18 },
+});

@@ -1,6 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Query, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Query, Depends, Request, Header
 from fastapi.responses import Response
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -10,10 +9,9 @@ import io
 import logging
 import uuid
 import requests
-import jwt
-import bcrypt
+import httpx
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from emergentintegrations.llm.openai.speech_to_text import OpenAISpeechToText
@@ -37,12 +35,10 @@ storage_key: Optional[str] = None
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
-bearer = HTTPBearer(auto_error=False)
 
-# Auth config
-JWT_SECRET = os.environ.get("JWT_SECRET_KEY", "orthovault-dev-secret-change-me")
-JWT_ALGO = "HS256"
-TOKEN_MINUTES = 60 * 24 * 7  # 7 days
+# Emergent auth
+EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+SESSION_TTL_DAYS = 7
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -146,78 +142,149 @@ class PatientUpsert(BaseModel):
 
 
 # ---------- Auth Models ----------
-class RegisterIn(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6, max_length=72)
-    name: str = ""
-
-
-class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6, max_length=72)
-    name: str = ""
-    role: str = "editor"  # admin | editor | viewer
+class SessionExchange(BaseModel):
+    session_id: str
 
 
 class UserOut(BaseModel):
-    id: str
+    user_id: str
     email: str
     name: str = ""
-    role: str
+    picture: str = ""
+    role: str = "editor"
 
 
-class TokenOut(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+class SessionOut(BaseModel):
+    session_token: str
     user: UserOut
 
 
-def _hash_pw(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode("utf-8")[:72], bcrypt.gensalt(rounds=12)).decode()
-
-
-def _verify_pw(pw: str, stored: str) -> bool:
-    try:
-        return bcrypt.checkpw(pw.encode("utf-8")[:72], stored.encode())
-    except Exception:
-        return False
-
-
-def _make_token(user: dict) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": user["id"],
-        "role": user["role"],
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=TOKEN_MINUTES)).timestamp()),
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
-
-
-async def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer)) -> dict:
-    if not creds or not creds.credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0, "password_hash": 0})
+async def current_user(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)) -> dict:
+    tok: Optional[str] = None
+    if authorization and authorization.lower().startswith("bearer "):
+        tok = authorization.split(None, 1)[1].strip()
+    elif token:
+        tok = token.strip()
+    if not tok:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    session = await db.user_sessions.find_one({"session_token": tok}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    exp = session.get("expires_at")
+    if isinstance(exp, datetime):
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Session expired")
+    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
 
 
-def require_roles(*roles):
-    async def dep(user=Depends(current_user)):
-        if user["role"] not in roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return user
-    return dep
+def require_admin(user=Depends(current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
+
+
+# ---------- Auth Routes ----------
+@api_router.post("/auth/session", response_model=SessionOut)
+async def auth_session(payload: SessionExchange):
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(EMERGENT_AUTH_URL, headers={"X-Session-ID": payload.session_id})
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired session_id")
+    data = r.json()
+    email = (data.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=401, detail="Auth response missing email")
+    name = data.get("name") or ""
+    picture = data.get("picture") or ""
+    session_token = data.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=401, detail="Auth response missing session_token")
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=SESSION_TTL_DAYS)
+
+    # Upsert user by email
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        user = existing
+        # Update profile fields opportunistically
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"name": name or user.get("name", ""), "picture": picture or user.get("picture", "")}})
+    else:
+        # First-ever user becomes admin
+        total = await db.users.count_documents({})
+        role = "admin" if total == 0 else "editor"
+        user = {
+            "user_id": f"user_{uuid.uuid4().hex[:12]}",
+            "email": email,
+            "name": name,
+            "picture": picture,
+            "role": role,
+            "created_at": now,
+        }
+        await db.users.insert_one(dict(user))
+
+    # Store session
+    await db.user_sessions.insert_one({
+        "session_token": session_token,
+        "user_id": user["user_id"],
+        "created_at": now,
+        "expires_at": expires_at,
+    })
+
+    return SessionOut(
+        session_token=session_token,
+        user=UserOut(
+            user_id=user["user_id"],
+            email=user["email"],
+            name=user.get("name", ""),
+            picture=user.get("picture", ""),
+            role=user.get("role", "editor"),
+        ),
+    )
+
+
+@api_router.get("/auth/me", response_model=UserOut)
+async def auth_me(user=Depends(current_user)):
+    return UserOut(
+        user_id=user["user_id"],
+        email=user["email"],
+        name=user.get("name", ""),
+        picture=user.get("picture", ""),
+        role=user.get("role", "editor"),
+    )
+
+
+@api_router.post("/auth/logout")
+async def auth_logout(authorization: Optional[str] = Header(None)):
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(None, 1)[1].strip()
+        await db.user_sessions.delete_one({"session_token": token})
+    return {"ok": True}
+
+
+@api_router.get("/auth/users", response_model=List[UserOut])
+async def list_users(_=Depends(require_admin)):
+    docs = await db.users.find({}, {"_id": 0}).to_list(500)
+    return [UserOut(**{k: d.get(k, '') for k in ('user_id', 'email', 'name', 'picture', 'role')}) for d in docs]
+
+
+class RoleUpdate(BaseModel):
+    role: str
+
+
+@api_router.patch("/auth/users/{user_id}")
+async def update_user_role(user_id: str, payload: RoleUpdate, _=Depends(require_admin)):
+    if payload.role not in ("admin", "editor", "viewer"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    res = await db.users.update_one({"user_id": user_id}, {"$set": {"role": payload.role}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
 
 
 # ---------- Routes ----------
@@ -227,45 +294,58 @@ async def root():
 
 
 @api_router.get("/patients", response_model=List[Patient])
-async def list_patients():
-    docs = await db.patients.find({}, {"_id": 0}).to_list(2000)
+async def list_patients(user=Depends(current_user)):
+    q = {} if user.get("role") == "admin" else {"owner_id": user["user_id"]}
+    docs = await db.patients.find(q, {"_id": 0}).to_list(2000)
     return [Patient(**d) for d in docs]
 
 
 @api_router.get("/patients/{pid}", response_model=Patient)
-async def get_patient(pid: str):
+async def get_patient(pid: str, user=Depends(current_user)):
     doc = await db.patients.find_one({"id": pid}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Patient not found")
+    if user.get("role") != "admin" and doc.get("owner_id") and doc["owner_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not your patient")
     return Patient(**doc)
 
 
 @api_router.post("/patients", response_model=Patient)
-async def upsert_patient(payload: PatientUpsert):
+async def upsert_patient(payload: PatientUpsert, user=Depends(current_user)):
+    if user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Read-only user")
     now = datetime.now(timezone.utc).isoformat()
     if payload.id:
         existing = await db.patients.find_one({"id": payload.id}, {"_id": 0})
         if existing:
+            if user.get("role") != "admin" and existing.get("owner_id") and existing["owner_id"] != user["user_id"]:
+                raise HTTPException(status_code=403, detail="Not your patient")
             data = payload.model_dump()
             data["created_at"] = existing.get("created_at", now)
             data["updated_at"] = now
+            data["owner_id"] = existing.get("owner_id") or user["user_id"]
             await db.patients.update_one({"id": payload.id}, {"$set": data})
             return Patient(**data)
-    # create new
     pid = payload.id or str(uuid.uuid4())
     data = payload.model_dump()
     data["id"] = pid
     data["created_at"] = now
     data["updated_at"] = now
+    data["owner_id"] = user["user_id"]
     await db.patients.insert_one(dict(data))
     return Patient(**data)
 
 
 @api_router.delete("/patients/{pid}")
-async def delete_patient(pid: str):
-    res = await db.patients.delete_one({"id": pid})
-    if res.deleted_count == 0:
+async def delete_patient(pid: str, user=Depends(current_user)):
+    doc = await db.patients.find_one({"id": pid}, {"_id": 0})
+    if not doc:
         raise HTTPException(status_code=404, detail="Patient not found")
+    if user.get("role") != "admin" and doc.get("owner_id") and doc["owner_id"] != user["user_id"]:
+        raise HTTPException(status_code=403, detail="Not your patient")
+    if user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Read-only user")
+    await db.patients.delete_one({"id": pid})
     return {"ok": True}
 
 
@@ -286,14 +366,22 @@ def _guess_kind(mime: str, name: str) -> str:
 
 
 @api_router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), user=Depends(current_user)):
+    if user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Read-only user")
     contents = await file.read()
+    if len(contents) > 100 * 1024 * 1024:  # 100 MiB cap
+        raise HTTPException(status_code=413, detail="File exceeds 100 MiB limit")
     original_name = file.filename or "file"
     ext = ""
     if "." in original_name:
-        ext = "." + original_name.rsplit(".", 1)[1].lower()
+        raw = original_name.rsplit(".", 1)[1].lower()
+        # only keep alnum extensions of reasonable length
+        cleaned = "".join(c for c in raw if c.isalnum())[:8]
+        if cleaned:
+            ext = "." + cleaned
     obj_uuid = str(uuid.uuid4())
-    path = f"{APP_NAME}/uploads/patients/{obj_uuid}{ext}"
+    path = f"{APP_NAME}/uploads/patients/{user['user_id']}/{obj_uuid}{ext}"
     mime = file.content_type or "application/octet-stream"
     try:
         result = await run_in_threadpool(_put_object_sync, path, contents, mime)
@@ -313,7 +401,16 @@ async def upload_file(file: UploadFile = File(...)):
 
 
 @api_router.get("/files/{path:path}")
-async def get_file(path: str):
+async def get_file(path: str, user=Depends(current_user)):
+    # Path sanity: must live under our uploads prefix and not traverse
+    upload_prefix = f"{APP_NAME}/uploads/patients/"
+    if ".." in path or path.startswith("/") or "\\" in path or "%2e" in path.lower() or not path.startswith(upload_prefix):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    # Ownership: non-admins may only read files that belong to them (path segment matches their user_id)
+    if user.get("role") != "admin":
+        expected_prefix = f"{upload_prefix}{user['user_id']}/"
+        if not path.startswith(expected_prefix):
+            raise HTTPException(status_code=403, detail="Not your file")
     try:
         content, ctype = await run_in_threadpool(_get_object_sync, path)
     except HTTPException:
@@ -325,7 +422,7 @@ async def get_file(path: str):
 
 
 @api_router.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(file: UploadFile = File(...), user=Depends(current_user)):
     """Transcribe short audio recording (voice notes) via Whisper."""
     data = await file.read()
     if not data:
@@ -363,7 +460,7 @@ class DraftDischargeIn(BaseModel):
 
 
 @api_router.post("/ai/draft-discharge")
-async def draft_discharge(payload: DraftDischargeIn):
+async def draft_discharge(payload: DraftDischargeIn, user=Depends(current_user)):
     if not EMERGENT_KEY:
         raise HTTPException(status_code=500, detail="LLM key missing")
     if not (payload.operative_note.strip() or payload.result.strip()):
@@ -418,6 +515,16 @@ async def _startup():
         logger.info("Object storage initialized")
     except Exception as e:
         logger.warning(f"Object storage init failed at startup: {e}")
+    # Ensure indexes for auth
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("user_id", unique=True)
+        await db.user_sessions.create_index("session_token", unique=True)
+        await db.user_sessions.create_index("user_id")
+        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+        logger.info("Auth indexes ensured")
+    except Exception as e:
+        logger.warning(f"Index creation failed: {e}")
 
 
 @app.on_event("shutdown")
