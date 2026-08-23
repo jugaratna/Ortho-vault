@@ -10,10 +10,19 @@ const WEB_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
 const IOS_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
 const ANDROID_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
 
+function isRealClientId(value: string) {
+  // Reject empty and any leftover placeholder like "YOUR_GOOGLE_..._CLIENT_ID.apps.googleusercontent.com"
+  if (!value) return false;
+  if (value.startsWith('YOUR_')) return false;
+  return value.endsWith('.apps.googleusercontent.com');
+}
+
 function currentClientId() {
-  if (Platform.OS === 'web') return WEB_ID;
-  if (Platform.OS === 'ios') return IOS_ID;
-  return ANDROID_ID;
+  let raw = '';
+  if (Platform.OS === 'web') raw = WEB_ID;
+  else if (Platform.OS === 'ios') raw = IOS_ID;
+  else raw = ANDROID_ID;
+  return isRealClientId(raw) ? raw : '';
 }
 
 export function isDriveConfigured() {
