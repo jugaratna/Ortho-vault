@@ -9,15 +9,20 @@ import {
   RefreshControl,
   ScrollView,
   ActivityIndicator,
+  Modal,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { api, fileUrl, Patient } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
-import { isOverdue, daysSinceSurgery, FOLLOWUP_DAYS } from '@/src/utils/followup';
+import { useSettings } from '@/src/settings';
+import { isOverdue, daysSinceSurgery } from '@/src/utils/followup';
+import { exportBulkPdf } from '@/src/utils/export-pdf';
 
 type SortKey =
   | 'overdue'
@@ -51,11 +56,16 @@ export default function Dashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, isDark } = useTheme();
+  const { followupDays } = useSettings();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<SortKey>('dos_new');
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkDate, setBulkDate] = useState<Date>(new Date());
+  const [showBulkPicker, setShowBulkPicker] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -84,7 +94,7 @@ export default function Dashboard() {
     });
 
     if (sort === 'overdue') {
-      arr = arr.filter((p) => isOverdue(p));
+      arr = arr.filter((p) => isOverdue(p, followupDays));
     }
 
     const cmp = (a: Patient, b: Patient) => {
@@ -111,7 +121,22 @@ export default function Dashboard() {
       }
     };
     return [...arr].sort(cmp);
-  }, [patients, q, sort]);
+  }, [patients, q, sort, followupDays]);
+
+  const overdueCount = patients.filter((p) => isOverdue(p, followupDays)).length;
+
+  const runBulkExport = async () => {
+    const iso = bulkDate.toISOString().slice(0, 10);
+    const list = patients.filter((p) => p.date_of_surgery === iso);
+    if (list.length === 0) return;
+    try {
+      setBulkBusy(true);
+      await exportBulkPdf(list, `Operating List — ${iso}`);
+      setShowBulk(false);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: colors.surface }]}>
@@ -122,18 +147,27 @@ export default function Dashboard() {
             <Text style={[styles.brandTitle, { color: colors.onSurface }]}>OrthoVault</Text>
             <Text style={[styles.brandSub, { color: colors.muted }]}>
               {patients.length} patient{patients.length === 1 ? '' : 's'}
-              {patients.filter((p) => isOverdue(p)).length > 0 && (
-                <Text style={{ color: colors.warning }}> • {patients.filter((p) => isOverdue(p)).length} overdue</Text>
+              {overdueCount > 0 && (
+                <Text style={{ color: colors.warning }}> • {overdueCount} overdue</Text>
               )}
             </Text>
           </View>
-          <Pressable
-            testID="settings-btn"
-            onPress={() => router.push('/settings')}
-            style={({ pressed }) => [styles.iconBtn, { backgroundColor: colors.surfaceTertiary, opacity: pressed ? 0.7 : 1 }]}
-          >
-            <Ionicons name="settings-outline" size={20} color={colors.onSurface} />
-          </Pressable>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <Pressable
+              testID="bulk-export-btn"
+              onPress={() => setShowBulk(true)}
+              style={({ pressed }) => [styles.iconBtn, { backgroundColor: colors.surfaceTertiary, opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Ionicons name="print-outline" size={20} color={colors.onSurface} />
+            </Pressable>
+            <Pressable
+              testID="settings-btn"
+              onPress={() => router.push('/settings')}
+              style={({ pressed }) => [styles.iconBtn, { backgroundColor: colors.surfaceTertiary, opacity: pressed ? 0.7 : 1 }]}
+            >
+              <Ionicons name="settings-outline" size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
         </View>
 
         <View style={[styles.searchBar, { backgroundColor: colors.surfaceTertiary, borderColor: colors.border }]}>
@@ -227,15 +261,70 @@ export default function Dashboard() {
       >
         <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
       </Pressable>
+
+      {/* Bulk Export Modal */}
+      <Modal visible={showBulk} transparent animationType="slide" onRequestClose={() => setShowBulk(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHead}>
+              <Text style={[styles.modalTitle, { color: colors.onSurface }]}>Bulk PDF Export</Text>
+              <Pressable testID="bulk-close" onPress={() => setShowBulk(false)}>
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <Text style={{ color: colors.muted, marginBottom: spacing.md, fontSize: 13 }}>
+              Combine every patient operated on a chosen day into one PDF for morning rounds.
+            </Text>
+
+            <Text style={{ color: colors.onSurfaceTertiary, fontSize: 12, fontWeight: '600', marginBottom: 6 }}>OPERATING DATE</Text>
+            <Pressable testID="bulk-date-btn" onPress={() => setShowBulkPicker(true)} style={[styles.bulkDate, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+              <Ionicons name="calendar-outline" size={18} color={colors.brand} />
+              <Text style={{ color: colors.onSurface, fontSize: 15, fontWeight: '600' }}>{bulkDate.toISOString().slice(0, 10)}</Text>
+            </Pressable>
+            {showBulkPicker && (
+              <DateTimePicker
+                value={bulkDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                onChange={(_, d) => { setShowBulkPicker(Platform.OS === 'ios'); if (d) setBulkDate(d); }}
+              />
+            )}
+
+            <View style={{ backgroundColor: colors.surfaceTertiary, padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, marginBottom: spacing.md }}>
+              <Text style={{ color: colors.onSurface, fontSize: 13, fontWeight: '600' }}>
+                {patients.filter((p) => p.date_of_surgery === bulkDate.toISOString().slice(0, 10)).length} patient(s) match
+              </Text>
+              <Text style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>
+                Only patients with matching Date of Surgery are included.
+              </Text>
+            </View>
+
+            <Pressable
+              testID="bulk-export-confirm"
+              onPress={runBulkExport}
+              disabled={bulkBusy || patients.filter((p) => p.date_of_surgery === bulkDate.toISOString().slice(0, 10)).length === 0}
+              style={({ pressed }) => [styles.bulkCta, { backgroundColor: colors.brandPrimary, opacity: pressed || bulkBusy ? 0.75 : 1 }]}
+            >
+              {bulkBusy ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
+                <>
+                  <Ionicons name="print" size={16} color={colors.onBrandPrimary} />
+                  <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 15 }}>Export Combined PDF</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 function PatientCard({ patient, onPress }: { patient: Patient; onPress: () => void }) {
   const { colors } = useTheme();
+  const { followupDays } = useSettings();
   const preThumb = patient.pre_op?.find((f) => f.kind === 'image');
   const postThumb = patient.post_op?.find((f) => f.kind === 'image');
-  const overdue = isOverdue(patient);
+  const overdue = isOverdue(patient, followupDays);
   const days = daysSinceSurgery(patient);
 
   return (
@@ -343,4 +432,10 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 8,
   },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: spacing.lg },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  modalTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
+  bulkDate: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
+  bulkCta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: radius.md },
 });

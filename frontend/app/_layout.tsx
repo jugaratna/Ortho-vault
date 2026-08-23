@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { useIconFonts } from '@/src/hooks/use-icon-fonts';
 import { ThemeProvider, useTheme } from '@/src/theme';
+import { SettingsProvider } from '@/src/settings';
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -44,7 +45,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <RootNav />
+          <SettingsProvider>
+            <RootNav />
+          </SettingsProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useTheme, spacing, radius, ThemeMode } from '@/src/theme';
+import { useSettings, FollowupDays } from '@/src/settings';
 import { useGoogleDriveAuth, isDriveConfigured } from '@/src/utils/google-auth';
 import { backupToDrive, listBackupFolders, restoreFromDrive, BackupFolder } from '@/src/utils/drive';
 
@@ -14,6 +15,7 @@ export default function Settings() {
 
   const drive = useGoogleDriveAuth();
   const configured = isDriveConfigured();
+  const { followupDays, setFollowupDays } = useSettings();
   const [busy, setBusy] = useState<null | 'backup' | 'restore-list' | 'restore'>(null);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const [progressMsg, setProgressMsg] = useState('');
@@ -90,6 +92,25 @@ export default function Settings() {
                 <Ionicons name={m.icon} size={20} color={colors.onSurface} />
                 <Text style={[styles.rowLabel, { color: colors.onSurface }]}>{m.label}</Text>
                 {mode === m.value && <Ionicons name="checkmark-circle" size={20} color={colors.brand} />}
+              </Pressable>
+            ))}
+          </View>
+        </Section>
+
+        <Section title="Follow-up Window" colors={colors}>
+          <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>
+            Flag patients as overdue when this many days have passed since surgery without a recorded outcome.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+            {([30, 60, 90] as FollowupDays[]).map((d) => (
+              <Pressable
+                key={d}
+                testID={`followup-${d}`}
+                onPress={() => setFollowupDays(d)}
+                style={[styles.dayChip, { backgroundColor: followupDays === d ? colors.brandPrimary : colors.surfaceSecondary, borderColor: followupDays === d ? colors.brandPrimary : colors.border }]}
+              >
+                <Text style={{ color: followupDays === d ? colors.onBrandPrimary : colors.onSurface, fontWeight: '700', fontSize: 15 }}>{d}</Text>
+                <Text style={{ color: followupDays === d ? colors.onBrandPrimary : colors.muted, fontSize: 11, marginTop: 2 }}>days</Text>
               </Pressable>
             ))}
           </View>
@@ -266,4 +287,5 @@ const styles = StyleSheet.create({
   modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
   modalTitle: { fontSize: 17, fontWeight: '700' },
   folderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.sm },
+  dayChip: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
 });

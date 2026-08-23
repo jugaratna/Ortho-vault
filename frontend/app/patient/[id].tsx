@@ -9,9 +9,9 @@ import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { api, fileUrl, MediaFile, Patient } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
-import { exportPatientPdf } from '@/src/utils/export-pdf';
+import { exportPatientPdf, exportPatientNotesPdf, downloadMediaFile } from '@/src/utils/export-pdf';
 
-type Tab = 'demographics' | 'history' | 'comparison' | 'results' | 'video';
+type Tab = 'demographics' | 'history' | 'comparison' | 'results' | 'video' | 'timeline';
 
 export default function PatientDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -52,6 +52,7 @@ export default function PatientDetail() {
     { key: 'comparison', label: 'Compare', icon: 'swap-horizontal-outline' },
     { key: 'results', label: 'Results', icon: 'checkmark-done-outline' },
     { key: 'video', label: 'Video', icon: 'videocam-outline' },
+    { key: 'timeline', label: 'Timeline', icon: 'time-outline' },
   ];
 
   return (
@@ -111,6 +112,7 @@ export default function PatientDetail() {
         {tab === 'comparison' && <ComparisonTab patient={patient} />}
         {tab === 'results' && <ResultsTab patient={patient} />}
         {tab === 'video' && <VideoTab patient={patient} />}
+        {tab === 'timeline' && <TimelineTab patient={patient} />}
       </ScrollView>
     </View>
   );
@@ -151,7 +153,13 @@ function HistoryTab({ patient }: { patient: Patient }) {
         </View>
       )}
       <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
-        <Text style={[styles.sectionLabel, { color: colors.muted }]}>CHIEF COMPLAINTS & HISTORY</Text>
+        <View style={styles.notesHead}>
+          <Text style={[styles.sectionLabel, { color: colors.muted }]}>CHIEF COMPLAINTS & HISTORY</Text>
+          <Pressable testID="download-notes-btn" onPress={() => exportPatientNotesPdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
+            <Ionicons name="download-outline" size={13} color={colors.brand} />
+            <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Notes PDF</Text>
+          </Pressable>
+        </View>
         <Text style={{ color: colors.onSurface, fontSize: 15, lineHeight: 22 }}>
           {patient.history || 'No history recorded.'}
         </Text>
@@ -164,7 +172,13 @@ function ResultsTab({ patient }: { patient: Patient }) {
   const { colors } = useTheme();
   return (
     <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.lg }]}>
-      <Text style={[styles.sectionLabel, { color: colors.muted }]}>CLINICAL RESULT / OUTCOME</Text>
+      <View style={styles.notesHead}>
+        <Text style={[styles.sectionLabel, { color: colors.muted }]}>CLINICAL RESULT / OUTCOME</Text>
+        <Pressable testID="download-result-btn" onPress={() => exportPatientNotesPdf(patient)} style={[styles.dlBtn, { backgroundColor: colors.brandTertiary }]}>
+          <Ionicons name="download-outline" size={13} color={colors.brand} />
+          <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Notes PDF</Text>
+        </Pressable>
+      </View>
       <Text style={{ color: colors.onSurface, fontSize: 15, lineHeight: 22 }}>
         {patient.result || 'No outcome recorded yet.'}
       </Text>
@@ -248,25 +262,33 @@ function MediaList({ title, files }: { title: string; files: MediaFile[] }) {
   const renderGrid = (list: MediaFile[]) => (
     <View style={styles.grid}>
       {list.map((f) => (
-        <Pressable
-          key={f.id}
-          testID={`media-${f.id}`}
-          onPress={() => {
-            if (f.kind === 'image') router.push({ pathname: '/media-viewer', params: { path: f.storage_path, name: f.name } });
-            else if (f.kind === 'pdf' || f.kind === 'doc') router.push({ pathname: '/pdf-viewer', params: { path: f.storage_path, name: f.name } });
-            else WebBrowser.openBrowserAsync(fileUrl(f.storage_path));
-          }}
-          style={[styles.gridItem, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
-        >
-          {f.kind === 'image' ? (
-            <Image source={{ uri: fileUrl(f.storage_path) }} style={styles.gridImg} contentFit="cover" />
-          ) : (
-            <View style={[styles.gridImg, { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTertiary }]}>
-              <Ionicons name={f.kind === 'pdf' ? 'document-text' : f.kind === 'video' ? 'play-circle' : 'document'} size={36} color={colors.brand} />
-            </View>
-          )}
-          <Text numberOfLines={1} style={{ color: colors.onSurface, fontSize: 11, padding: 6 }}>{f.name}</Text>
-        </Pressable>
+        <View key={f.id} style={[styles.gridItem, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+          <Pressable
+            testID={`media-${f.id}`}
+            onPress={() => {
+              if (f.kind === 'image') router.push({ pathname: '/media-viewer', params: { path: f.storage_path, name: f.name } });
+              else if (f.kind === 'pdf' || f.kind === 'doc') router.push({ pathname: '/pdf-viewer', params: { path: f.storage_path, name: f.name } });
+              else WebBrowser.openBrowserAsync(fileUrl(f.storage_path));
+            }}
+          >
+            {f.kind === 'image' ? (
+              <Image source={{ uri: fileUrl(f.storage_path) }} style={styles.gridImg} contentFit="cover" />
+            ) : (
+              <View style={[styles.gridImg, { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTertiary }]}>
+                <Ionicons name={f.kind === 'pdf' ? 'document-text' : f.kind === 'video' ? 'play-circle' : 'document'} size={36} color={colors.brand} />
+              </View>
+            )}
+            <Text numberOfLines={1} style={{ color: colors.onSurface, fontSize: 11, padding: 6, paddingBottom: 2 }}>{f.name}</Text>
+          </Pressable>
+          <Pressable
+            testID={`download-${f.id}`}
+            onPress={() => downloadMediaFile(f)}
+            style={[styles.dlChip, { backgroundColor: colors.brandTertiary }]}
+          >
+            <Ionicons name="download-outline" size={11} color={colors.brand} />
+            <Text style={{ color: colors.brand, fontSize: 10, fontWeight: '700' }}>Download</Text>
+          </Pressable>
+        </View>
       ))}
     </View>
   );
@@ -362,7 +384,87 @@ function VideoPlayerCard({ file }: { file: MediaFile }) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
       <VideoView style={{ width: '100%', height: 220, backgroundColor: '#000' }} player={player} allowsFullscreen nativeControls />
-      <Text style={{ color: colors.onSurface, fontSize: 13, fontWeight: '600', padding: spacing.md }}>{file.name}</Text>
+      <View style={styles.videoFoot}>
+        <Text style={{ color: colors.onSurface, fontSize: 13, fontWeight: '600', flex: 1 }} numberOfLines={1}>{file.name}</Text>
+        <Pressable
+          testID={`download-${file.id}`}
+          onPress={() => downloadMediaFile(file)}
+          style={[styles.dlChip, { backgroundColor: colors.brandTertiary, marginLeft: 8 }]}
+        >
+          <Ionicons name="download-outline" size={12} color={colors.brand} />
+          <Text style={{ color: colors.brand, fontSize: 11, fontWeight: '700' }}>Download</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function TimelineTab({ patient }: { patient: Patient }) {
+  const { colors } = useTheme();
+  const router = useRouter();
+
+  type Ev = { at: string; kind: 'created' | 'surgery' | 'pre_op' | 'post_op' | 'video' | 'result'; icon: keyof typeof import('@expo/vector-icons').Ionicons.glyphMap; title: string; sub?: string; file?: MediaFile; color: string };
+  const events: Ev[] = [];
+  if (patient.created_at) events.push({ at: patient.created_at, kind: 'created', icon: 'person-add-outline', title: 'Patient record created', sub: patient.name, color: colors.info });
+  if (patient.date_of_surgery) events.push({ at: patient.date_of_surgery + 'T12:00:00Z', kind: 'surgery', icon: 'medkit', title: 'Surgery performed', sub: patient.diagnosis || 'Orthopedic procedure', color: colors.brandPrimary });
+  (patient.pre_op || []).forEach((f) => events.push({ at: f.uploaded_at || patient.created_at || '', kind: 'pre_op', icon: 'images-outline', title: 'Pre-op ' + (f.kind === 'image' ? 'image' : f.kind), sub: f.name, file: f, color: colors.brandSecondary }));
+  (patient.post_op || []).forEach((f) => events.push({ at: f.uploaded_at || patient.updated_at || '', kind: 'post_op', icon: 'albums-outline', title: 'Post-op ' + (f.kind === 'image' ? 'image' : f.kind), sub: f.name, file: f, color: colors.success }));
+  (patient.videos || []).forEach((f) => events.push({ at: f.uploaded_at || patient.updated_at || '', kind: 'video', icon: 'videocam-outline', title: 'Video', sub: f.name, file: f, color: colors.warning }));
+  if (patient.result && patient.result.trim()) events.push({ at: patient.updated_at || new Date().toISOString(), kind: 'result', icon: 'checkmark-done-outline', title: 'Outcome recorded', sub: patient.result.slice(0, 80), color: colors.brand });
+
+  events.sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+
+  if (events.length === 0) {
+    return (
+      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.xl, alignItems: 'center' }]}>
+        <Ionicons name="time-outline" size={40} color={colors.muted} />
+        <Text style={{ color: colors.muted, marginTop: spacing.sm }}>No timeline events yet</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ paddingLeft: 8 }}>
+      {events.map((ev, i) => (
+        <View key={i} style={styles.tlRow}>
+          <View style={styles.tlLeftCol}>
+            <View style={[styles.tlDot, { backgroundColor: ev.color, borderColor: colors.surface }]}>
+              <Ionicons name={ev.icon} size={12} color="#fff" />
+            </View>
+            {i < events.length - 1 && <View style={[styles.tlLine, { backgroundColor: colors.border }]} />}
+          </View>
+          <Pressable
+            onPress={() => {
+              if (!ev.file) return;
+              if (ev.file.kind === 'image') router.push({ pathname: '/media-viewer', params: { path: ev.file.storage_path, name: ev.file.name } });
+              else if (ev.file.kind === 'pdf' || ev.file.kind === 'doc') router.push({ pathname: '/pdf-viewer', params: { path: ev.file.storage_path, name: ev.file.name } });
+              else WebBrowser.openBrowserAsync(fileUrl(ev.file.storage_path));
+            }}
+            style={({ pressed }) => [styles.tlCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, opacity: pressed && ev.file ? 0.8 : 1 }]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.onSurface, fontSize: 14, fontWeight: '700' }}>{ev.title}</Text>
+              {!!ev.sub && <Text numberOfLines={2} style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>{ev.sub}</Text>}
+              <Text style={{ color: colors.muted, fontSize: 11, marginTop: 6, fontWeight: '600' }}>
+                {ev.at ? new Date(ev.at).toLocaleString() : '—'}
+              </Text>
+            </View>
+            {ev.file?.kind === 'image' && (
+              <Image source={{ uri: fileUrl(ev.file.storage_path) }} style={styles.tlThumb} contentFit="cover" />
+            )}
+            {ev.file && (
+              <Pressable
+                testID={`tl-download-${ev.file.id}`}
+                onPress={() => downloadMediaFile(ev.file!)}
+                style={[styles.tlDlBtn, { backgroundColor: colors.brandTertiary }]}
+                hitSlop={8}
+              >
+                <Ionicons name="download-outline" size={14} color={colors.brand} />
+              </Pressable>
+            )}
+          </Pressable>
+        </View>
+      ))}
     </View>
   );
 }
@@ -395,4 +497,15 @@ const styles = StyleSheet.create({
   subHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 6 },
   subHeadText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
   subCount: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, minWidth: 22, alignItems: 'center' },
+  notesHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dlBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
+  dlChip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#0002' },
+  videoFoot: { flexDirection: 'row', alignItems: 'center', padding: spacing.md },
+  tlRow: { flexDirection: 'row', gap: 12, marginBottom: spacing.md },
+  tlLeftCol: { alignItems: 'center', width: 28 },
+  tlDot: { width: 26, height: 26, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 3 },
+  tlLine: { width: 2, flex: 1, marginTop: 2 },
+  tlCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth },
+  tlThumb: { width: 56, height: 56, borderRadius: radius.sm },
+  tlDlBtn: { width: 32, height: 32, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
 });
