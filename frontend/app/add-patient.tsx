@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -21,7 +22,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { api, fileUrl, MediaFile, Patient, Sex } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
 import { searchIcd, IcdCode } from '@/src/data/icd10';
-import { DISCHARGE_TEMPLATE } from '@/src/data/templates';
+import { TEMPLATES, Template } from '@/src/data/templates';
 import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
 import { useSettings } from '@/src/settings';
 
@@ -55,6 +56,7 @@ export default function AddPatient() {
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const { followupDays: globalFollowup } = useSettings();
   const [followupDays, setFollowupDays] = useState<number | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -169,6 +171,12 @@ export default function AddPatient() {
     } finally {
       setVoiceState('idle');
     }
+  };
+
+  const insertTemplate = (tpl: Template) => {
+    setResult((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + tpl.body);
+    setShowTemplates(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const save = async () => {
@@ -332,12 +340,13 @@ export default function AddPatient() {
           <Field label="Clinical Result Notes">
             <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
               <Pressable
-                testID="insert-discharge-template"
-                onPress={() => { setResult((cur) => (cur.trim() ? cur.trim() + '\n\n' : '') + DISCHARGE_TEMPLATE); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                testID="open-template-library"
+                onPress={() => setShowTemplates(true)}
                 style={[styles.templateBtn, { backgroundColor: colors.brandTertiary, borderColor: colors.brand }]}
               >
-                <Ionicons name="document-text-outline" size={14} color={colors.brand} />
-                <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Insert Discharge Template</Text>
+                <Ionicons name="library-outline" size={14} color={colors.brand} />
+                <Text style={{ color: colors.onBrandTertiary, fontWeight: '700', fontSize: 12 }}>Template Library</Text>
+                <Ionicons name="chevron-down" size={12} color={colors.brand} />
               </Pressable>
             </View>
             <View style={{ position: 'relative' }}>
@@ -370,6 +379,44 @@ export default function AddPatient() {
           {saving ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={{ color: colors.onBrandPrimary, fontWeight: '700', fontSize: 16 }}>{id ? 'Update Patient' : 'Save Patient'}</Text>}
         </Pressable>
       </View>
+
+      {/* Template Library modal */}
+      <Modal visible={showTemplates} transparent animationType="slide" onRequestClose={() => setShowTemplates(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHead}>
+              <View>
+                <Text style={[styles.modalTitle, { color: colors.onSurface }]}>Template Library</Text>
+                <Text style={{ color: colors.muted, fontSize: 12, marginTop: 2 }}>Insert a standard clinical note into the Result field</Text>
+              </View>
+              <Pressable testID="template-close" onPress={() => setShowTemplates(false)}>
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
+              {TEMPLATES.map((t) => (
+                <Pressable
+                  key={t.id}
+                  testID={`template-${t.id}`}
+                  onPress={() => insertTemplate(t)}
+                  style={({ pressed }) => [styles.tplRow, { backgroundColor: pressed ? colors.surfaceTertiary : colors.surfaceSecondary, borderColor: colors.border }]}
+                >
+                  <View style={[styles.tplIcon, { backgroundColor: colors.brandTertiary }]}>
+                    <Ionicons name={t.icon} size={22} color={colors.brand} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.onSurface, fontSize: 15, fontWeight: '700' }}>{t.label}</Text>
+                    <Text numberOfLines={2} style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>
+                      {t.body.split('\n').slice(2, 5).join(' • ').replace(/\s+/g, ' ').slice(0, 90)}…
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -501,4 +548,10 @@ const styles = StyleSheet.create({
   followRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   followChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
   templateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: spacing.lg },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md },
+  modalTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
+  tplRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.sm },
+  tplIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
 });
