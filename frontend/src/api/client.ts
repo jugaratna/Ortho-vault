@@ -105,4 +105,18 @@ export const api = {
     const data = await json<{ draft: string }>(res);
     return data.draft;
   },
+
+  async listUsers() {
+    const res = await fetch(`${API_BASE}/auth/users`, { headers: authHeaders() });
+    return json<Array<{ user_id: string; email: string; name: string; picture: string; role: 'admin' | 'editor' | 'viewer' }>>(res);
+  },
+
+  async updateUserRole(user_id: string, role: 'admin' | 'editor' | 'viewer') {
+    const res = await fetch(`${API_BASE}/auth/users/${user_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ role }),
+    });
+    return json<{ ok: boolean }>(res);
+  },
 };

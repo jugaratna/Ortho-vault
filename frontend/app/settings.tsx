@@ -114,6 +114,23 @@ export default function Settings() {
           </View>
         </Section>
 
+        {user?.role === 'admin' && (
+          <Section title="Team" colors={colors}>
+            <Pressable
+              testID="open-team-btn"
+              onPress={() => router.push('/team')}
+              style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.surfaceTertiary : colors.surfaceSecondary, borderColor: colors.border }]}
+            >
+              <Ionicons name="people-outline" size={20} color={colors.brand} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: colors.onSurface }]}>Manage Team</Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>See all users and change their roles</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+            </Pressable>
+          </Section>
+        )}
+
         <Section title="Follow-up Window" colors={colors}>
           <Text style={{ color: colors.muted, fontSize: 12, marginBottom: spacing.sm }}>
             Flag patients as overdue when this many days have passed since surgery without a recorded outcome.
