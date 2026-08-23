@@ -1,59 +1,142 @@
 // Standard orthopedic clinical templates — one-tap insertion
+export type TplIcon = 'document-text-outline' | 'medkit-outline' | 'body-outline' | 'construct-outline' | 'clipboard-outline' | 'bookmark-outline';
+
 export type Template = {
   id: string;
   label: string;
-  icon: 'document-text-outline' | 'medkit-outline' | 'body-outline' | 'construct-outline';
+  icon: TplIcon;
   body: string;
+  builtin?: boolean;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export const TEMPLATES: Template[] = [
   {
+    id: 'operative-note',
+    label: 'Operative Note',
+    icon: 'clipboard-outline',
+    builtin: true,
+    body: `OPERATIVE NOTE
+
+Pre-op Diagnosis:
+- __
+
+Post-op Diagnosis:
+- __
+
+Procedure Performed:
+- (e.g. Right THA — Uncemented, Posterior Approach)
+
+Surgeon: Dr. __
+Assistant: __
+Anaesthetist: __
+Anaesthesia: General / Spinal / Regional
+
+Position:
+- Supine / Lateral / Prone / Beach chair
+
+Prep & Drape:
+- Standard sterile prep with __
+
+Incision:
+- Site & Length: __ cm
+
+Findings:
+- __
+
+Steps of Procedure:
+1.
+2.
+3.
+4.
+
+Implants Used:
+- (Manufacturer / Size / Lot #)
+
+Closure:
+- Deep fascia: __
+- Subcutaneous: __
+- Skin: Staples / Subcuticular / Interrupted
+
+Estimated Blood Loss: __ ml
+Tourniquet Time: __ min (if used)
+Fluoroscopy Time: __ sec (if used)
+
+Specimens Sent: None / Histopathology / Culture
+Drains: None / __ Fr suction × __
+
+Complications: None / __
+
+Post-op Instructions:
+- Weight bearing: __
+- Antibiotics: __
+- Analgesia: __
+- Follow-up: __ days
+
+Signature: _______________
+Date: ${today()}`,
+  },
+  {
     id: 'discharge',
     label: 'Discharge Summary',
     icon: 'document-text-outline',
-    body: `POST-OP OUTCOME SUMMARY
+    builtin: true,
+    body: `DISCHARGE SUMMARY
 
-Procedure:
-- (e.g. Total Knee Arthroplasty, Left)
+Admission Date: __
+Surgery Date: __
+Discharge Date: ${today()}
 
-Findings:
-- Intra-op findings & implant details
+Pre-op Diagnosis:
+- __
 
-Range of Motion (ROM):
+Procedure Performed:
+- __
+- Implants: __
+
+Hospital Course:
+- Uneventful / __
+
+Range of Motion at Discharge:
 - Flexion: __°  Extension: __°
 
 Function Scores:
-- WOMAC / OKS / HHS: __
-
-Post-op Protocol:
-- Weight bearing: (e.g. Full/Partial/Non)
-- Physiotherapy: (start day, frequency)
-- Ice / Compression: (schedule)
-
-Medications:
-- Antibiotic: __
-- Analgesic: __
-- Anticoagulant (DVT prophylaxis): __
+- WOMAC / OKS / HHS / DASH: __
 
 Wound Status:
-- Dry / Clean / Suture removal date
+- Dry / Clean / Suture removal date: __
+
+Weight Bearing:
+- Non / Partial / Full weight bearing
+
+Physiotherapy Protocol:
+- Start day: __
+- Frequency: __
+- Home exercises attached: Yes / No
+
+Discharge Medications:
+- Antibiotic: __ × __ days
+- Analgesic: __ × __ days
+- DVT prophylaxis: __ × __ days
+- Other: __
 
 Follow-up Plan:
 - OPD review in __ days
 - Suture removal at __ days
 - X-ray review at __ weeks
 
-Discharge Instructions Given: Yes / No
+Red-flag Signs Explained (Fever / Wound discharge / Sudden pain / DVT signs): Yes
 
-Signature: _______________
-Date: ${today()}`,
+Discharge Instructions Given: Yes
+
+Signature: _______________`,
   },
   {
     id: 'trauma',
     label: 'Trauma Notes',
     icon: 'medkit-outline',
+    builtin: true,
     body: `TRAUMA NOTES
 
 Mechanism of Injury:
@@ -101,6 +184,7 @@ Date: ${today()}`,
     id: 'arthroscopy',
     label: 'Arthroscopy Findings',
     icon: 'body-outline',
+    builtin: true,
     body: `ARTHROSCOPY OPERATIVE FINDINGS
 
 Joint:
@@ -151,6 +235,7 @@ Date: ${today()}`,
     id: 'fracture',
     label: 'Fracture Reduction',
     icon: 'construct-outline',
+    builtin: true,
     body: `FRACTURE REDUCTION NOTE
 
 Fracture:
@@ -196,6 +281,3 @@ Signature: _______________
 Date: ${today()}`,
   },
 ];
-
-// Legacy default export kept for backward compatibility
-export const DISCHARGE_TEMPLATE = TEMPLATES[0].body;

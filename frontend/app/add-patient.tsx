@@ -23,6 +23,7 @@ import { api, fileUrl, MediaFile, Patient, Sex } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
 import { searchIcd, IcdCode } from '@/src/data/icd10';
 import { TEMPLATES, Template } from '@/src/data/templates';
+import { useCustomTemplates, CustomTemplate } from '@/src/utils/custom-templates';
 import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
 import { useSettings } from '@/src/settings';
 
@@ -57,6 +58,11 @@ export default function AddPatient() {
   const { followupDays: globalFollowup } = useSettings();
   const [followupDays, setFollowupDays] = useState<number | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const { items: customTemplates, refresh: refreshCustom } = useCustomTemplates();
+
+  useEffect(() => {
+    if (showTemplates) refreshCustom();
+  }, [showTemplates, refreshCustom]);
 
   useEffect(() => {
     if (id) {
@@ -393,7 +399,50 @@ export default function AddPatient() {
                 <Ionicons name="close" size={22} color={colors.onSurface} />
               </Pressable>
             </View>
+
+            <Pressable
+              testID="template-new"
+              onPress={() => { setShowTemplates(false); router.push('/template-editor'); }}
+              style={({ pressed }) => [styles.newTplRow, { backgroundColor: pressed ? colors.brandPrimary : colors.brandTertiary, borderColor: colors.brand }]}
+            >
+              <Ionicons name="add-circle" size={22} color={colors.brand} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.onBrandTertiary, fontSize: 14, fontWeight: '700' }}>Create Custom Template</Text>
+                <Text style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>Author your own (e.g. Spine Fusion, Shoulder Arthroplasty)</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.brand} />
+            </Pressable>
+
             <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
+              {customTemplates.length > 0 && (
+                <>
+                  <Text style={[styles.groupLbl, { color: colors.muted }]}>MY CUSTOM TEMPLATES</Text>
+                  {customTemplates.map((t) => (
+                    <Pressable
+                      key={t.id}
+                      testID={`template-${t.id}`}
+                      onPress={() => insertTemplate(t)}
+                      onLongPress={() => { setShowTemplates(false); router.push({ pathname: '/template-editor', params: { id: t.id } }); }}
+                      delayLongPress={350}
+                      style={({ pressed }) => [styles.tplRow, { backgroundColor: pressed ? colors.surfaceTertiary : colors.surfaceSecondary, borderColor: colors.border }]}
+                    >
+                      <View style={[styles.tplIcon, { backgroundColor: colors.brandTertiary }]}>
+                        <Ionicons name={t.icon || 'bookmark-outline'} size={22} color={colors.brand} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: colors.onSurface, fontSize: 15, fontWeight: '700' }}>{t.label}</Text>
+                        <Text numberOfLines={2} style={{ color: colors.muted, fontSize: 12, marginTop: 3 }}>
+                          {t.body.split('\n').slice(0, 4).join(' • ').replace(/\s+/g, ' ').slice(0, 90)}…
+                        </Text>
+                        <Text style={{ color: colors.muted, fontSize: 10, marginTop: 3, fontStyle: 'italic' }}>Long-press to edit</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+                    </Pressable>
+                  ))}
+                </>
+              )}
+
+              <Text style={[styles.groupLbl, { color: colors.muted, marginTop: customTemplates.length ? spacing.md : 0 }]}>BUILT-IN TEMPLATES</Text>
               {TEMPLATES.map((t) => (
                 <Pressable
                   key={t.id}
@@ -554,4 +603,6 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
   tplRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.sm },
   tplIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  newTplRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderStyle: 'dashed', marginBottom: spacing.md },
+  groupLbl: { fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: spacing.sm, marginTop: 4 },
 });
