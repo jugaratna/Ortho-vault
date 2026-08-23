@@ -17,8 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { api, fileUrl, Patient } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
+import { isOverdue, daysSinceSurgery, FOLLOWUP_DAYS } from '@/src/utils/followup';
 
 type SortKey =
+  | 'overdue'
   | 'name_asc' | 'name_desc'
   | 'age_asc' | 'age_desc'
   | 'sex' | 'mobile'
@@ -28,6 +30,7 @@ type SortKey =
   | 'result' | 'has_video';
 
 const SORTS: { key: SortKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'overdue', label: 'Follow-up Overdue', icon: 'alert-circle-outline' },
   { key: 'dos_new', label: 'Newest Surgery', icon: 'time-outline' },
   { key: 'dos_old', label: 'Oldest Surgery', icon: 'hourglass-outline' },
   { key: 'name_asc', label: 'Name A–Z', icon: 'arrow-down-outline' },
@@ -80,8 +83,17 @@ export default function Dashboard() {
       );
     });
 
+    if (sort === 'overdue') {
+      arr = arr.filter((p) => isOverdue(p));
+    }
+
     const cmp = (a: Patient, b: Patient) => {
       switch (sort) {
+        case 'overdue': {
+          const da = daysSinceSurgery(a) ?? 0;
+          const db = daysSinceSurgery(b) ?? 0;
+          return db - da;
+        }
         case 'name_asc': return a.name.localeCompare(b.name);
         case 'name_desc': return b.name.localeCompare(a.name);
         case 'age_asc': return a.age - b.age;
@@ -108,7 +120,12 @@ export default function Dashboard() {
         <View style={styles.headerRow}>
           <View>
             <Text style={[styles.brandTitle, { color: colors.onSurface }]}>OrthoVault</Text>
-            <Text style={[styles.brandSub, { color: colors.muted }]}>{patients.length} patient{patients.length === 1 ? '' : 's'}</Text>
+            <Text style={[styles.brandSub, { color: colors.muted }]}>
+              {patients.length} patient{patients.length === 1 ? '' : 's'}
+              {patients.filter((p) => isOverdue(p)).length > 0 && (
+                <Text style={{ color: colors.warning }}> • {patients.filter((p) => isOverdue(p)).length} overdue</Text>
+              )}
+            </Text>
           </View>
           <Pressable
             testID="settings-btn"
@@ -218,6 +235,8 @@ function PatientCard({ patient, onPress }: { patient: Patient; onPress: () => vo
   const { colors } = useTheme();
   const preThumb = patient.pre_op?.find((f) => f.kind === 'image');
   const postThumb = patient.post_op?.find((f) => f.kind === 'image');
+  const overdue = isOverdue(patient);
+  const days = daysSinceSurgery(patient);
 
   return (
     <Pressable
@@ -239,9 +258,11 @@ function PatientCard({ patient, onPress }: { patient: Patient; onPress: () => vo
           <Text style={[styles.cardMeta, { color: colors.muted }]} numberOfLines={1}>{patient.country_code} {patient.mobile}</Text>
         </View>
         {!!patient.date_of_surgery && (
-          <View style={[styles.dosPill, { backgroundColor: colors.brandTertiary }]}>
-            <Ionicons name="calendar" size={11} color={colors.onBrandTertiary} />
-            <Text style={[styles.dosText, { color: colors.onBrandTertiary }]}>{patient.date_of_surgery}</Text>
+          <View style={[styles.dosPill, { backgroundColor: overdue ? colors.warning : colors.brandTertiary }]}>
+            <Ionicons name={overdue ? 'alert-circle' : 'calendar'} size={11} color={overdue ? colors.onWarning : colors.onBrandTertiary} />
+            <Text style={[styles.dosText, { color: overdue ? colors.onWarning : colors.onBrandTertiary }]}>
+              {overdue ? `Follow-up overdue • ${days}d` : patient.date_of_surgery}
+            </Text>
           </View>
         )}
         <View style={styles.badgesRow}>

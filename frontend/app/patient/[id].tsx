@@ -234,13 +234,73 @@ function ComparisonTab({ patient }: { patient: Patient }) {
         </View>
       </View>
 
-      <MediaList title="All Pre-op Files" files={pre} />
-      <MediaList title="All Post-op Files" files={post} />
+      <MediaList title="Pre-op" files={pre} />
+      <MediaList title="Post-op" files={post} />
     </View>
   );
 }
 
 function MediaList({ title, files }: { title: string; files: MediaFile[] }) {
+  const { colors } = useTheme();
+  const router = useRouter();
+  const images = files.filter((f) => f.kind === 'image');
+  const docs = files.filter((f) => f.kind === 'pdf' || f.kind === 'doc' || f.kind === 'dicom' || f.kind === 'other');
+  const renderGrid = (list: MediaFile[]) => (
+    <View style={styles.grid}>
+      {list.map((f) => (
+        <Pressable
+          key={f.id}
+          testID={`media-${f.id}`}
+          onPress={() => {
+            if (f.kind === 'image') router.push({ pathname: '/media-viewer', params: { path: f.storage_path, name: f.name } });
+            else if (f.kind === 'pdf' || f.kind === 'doc') router.push({ pathname: '/pdf-viewer', params: { path: f.storage_path, name: f.name } });
+            else WebBrowser.openBrowserAsync(fileUrl(f.storage_path));
+          }}
+          style={[styles.gridItem, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+        >
+          {f.kind === 'image' ? (
+            <Image source={{ uri: fileUrl(f.storage_path) }} style={styles.gridImg} contentFit="cover" />
+          ) : (
+            <View style={[styles.gridImg, { alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceTertiary }]}>
+              <Ionicons name={f.kind === 'pdf' ? 'document-text' : f.kind === 'video' ? 'play-circle' : 'document'} size={36} color={colors.brand} />
+            </View>
+          )}
+          <Text numberOfLines={1} style={{ color: colors.onSurface, fontSize: 11, padding: 6 }}>{f.name}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+  return (
+    <View style={{ gap: spacing.sm }}>
+      <Text style={[styles.sectionLabel, { color: colors.muted }]}>{title.toUpperCase()} — DOCUMENTS &amp; IMAGES</Text>
+
+      <SubHeadingRow label="Images" icon="images-outline" count={images.length} />
+      {images.length === 0 ? (
+        <Text style={{ color: colors.muted, fontSize: 12, fontStyle: 'italic' }}>No images uploaded</Text>
+      ) : renderGrid(images)}
+
+      <SubHeadingRow label="Documents" icon="document-attach-outline" count={docs.length} />
+      {docs.length === 0 ? (
+        <Text style={{ color: colors.muted, fontSize: 12, fontStyle: 'italic' }}>No documents uploaded</Text>
+      ) : renderGrid(docs)}
+    </View>
+  );
+}
+
+function SubHeadingRow({ label, icon, count }: { label: string; icon: keyof typeof import('@expo/vector-icons').Ionicons.glyphMap; count: number }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.subHead}>
+      <Ionicons name={icon} size={14} color={colors.brand} />
+      <Text style={[styles.subHeadText, { color: colors.onSurface }]}>{label}</Text>
+      <View style={[styles.subCount, { backgroundColor: colors.surfaceTertiary }]}>
+        <Text style={{ color: colors.muted, fontSize: 11, fontWeight: '700' }}>{count}</Text>
+      </View>
+    </View>
+  );
+}
+
+function _LegacyMediaList({ title, files }: { title: string; files: MediaFile[] }) {
   const { colors } = useTheme();
   const router = useRouter();
   return (
@@ -280,19 +340,17 @@ function MediaList({ title, files }: { title: string; files: MediaFile[] }) {
 function VideoTab({ patient }: { patient: Patient }) {
   const { colors } = useTheme();
   const videos = patient.videos || [];
-  if (videos.length === 0) {
-    return (
-      <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.xl, alignItems: 'center' }]}>
-        <Ionicons name="videocam-off-outline" size={40} color={colors.muted} />
-        <Text style={{ color: colors.muted, marginTop: spacing.sm }}>No videos recorded</Text>
-      </View>
-    );
-  }
   return (
-    <View style={{ gap: spacing.lg }}>
-      {videos.map((v) => (
-        <VideoPlayerCard key={v.id} file={v} />
-      ))}
+    <View style={{ gap: spacing.md }}>
+      <SubHeadingRow label="Videos" icon="videocam-outline" count={videos.length} />
+      {videos.length === 0 ? (
+        <View style={[styles.card, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border, padding: spacing.xl, alignItems: 'center' }]}>
+          <Ionicons name="videocam-off-outline" size={40} color={colors.muted} />
+          <Text style={{ color: colors.muted, marginTop: spacing.sm }}>No video documentation on record</Text>
+        </View>
+      ) : (
+        videos.map((v) => <VideoPlayerCard key={v.id} file={v} />)
+      )}
     </View>
   );
 }
@@ -334,4 +392,7 @@ const styles = StyleSheet.create({
   gridItem: { width: 100, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   gridImg: { width: '100%', height: 80 },
   sliderCta: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 16, borderRadius: radius.md, justifyContent: 'center' },
+  subHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 6 },
+  subHeadText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  subCount: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, minWidth: 22, alignItems: 'center' },
 });

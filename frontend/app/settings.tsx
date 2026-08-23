@@ -1,12 +1,11 @@
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { useTheme, spacing, radius, ThemeMode } from '@/src/theme';
 import { useGoogleDriveAuth, isDriveConfigured } from '@/src/utils/google-auth';
-import { createFolder, uploadJson, uploadRemoteUrl } from '@/src/utils/drive';
-import { api, fileUrl, MediaFile } from '@/src/api/client';
+import { backupToDrive, listBackupFolders, restoreFromDrive, BackupFolder } from '@/src/utils/drive';
 
 export default function Settings() {
   const router = useRouter();
@@ -15,8 +14,11 @@ export default function Settings() {
 
   const drive = useGoogleDriveAuth();
   const configured = isDriveConfigured();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<null | 'backup' | 'restore-list' | 'restore'>(null);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [progressMsg, setProgressMsg] = useState('');
+  const [folders, setFolders] = useState<BackupFolder[] | null>(null);
+  const [showRestore, setShowRestore] = useState(false);
 
   const modes: { value: ThemeMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { value: 'light', label: 'Light', icon: 'sunny-outline' },
@@ -24,34 +26,44 @@ export default function Settings() {
     { value: 'system', label: 'System', icon: 'phone-portrait-outline' },
   ];
 
-  const backupToDrive = async () => {
+  const runBackup = async () => {
     if (!drive.accessToken) return;
-    setStatus(null);
-    setBusy(true);
+    setStatus(null); setProgressMsg(''); setBusy('backup');
     try {
-      const patients = await api.listPatients();
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const folder = await createFolder(drive.accessToken, `OrthoVault Backup ${stamp}`);
-      await uploadJson(drive.accessToken, folder.id, 'patients.json', patients);
-
-      // Upload each media file the patients reference
-      const allFiles: { p: any; f: MediaFile }[] = [];
-      for (const p of patients) {
-        [...(p.pre_op || []), ...(p.post_op || []), ...(p.videos || [])].forEach((f) => allFiles.push({ p, f }));
-      }
-      for (const { p, f } of allFiles) {
-        const nice = `${p.name.replace(/\s+/g, '_')}__${f.section}__${f.name}`;
-        try {
-          await uploadRemoteUrl(drive.accessToken, folder.id, nice, f.mime, fileUrl(f.storage_path));
-        } catch {
-          // skip failed file, continue
-        }
-      }
-      setStatus({ ok: true, msg: `Backed up ${patients.length} patient${patients.length === 1 ? '' : 's'} & ${allFiles.length} file${allFiles.length === 1 ? '' : 's'} to Google Drive` });
+      const result = await backupToDrive(drive.accessToken, (m) => setProgressMsg(m));
+      setStatus({ ok: true, msg: `Backed up ${result.patients} patient${result.patients === 1 ? '' : 's'} & ${result.files} file${result.files === 1 ? '' : 's'} to "${result.folder.name}"` });
     } catch (e: any) {
       setStatus({ ok: false, msg: e?.message || 'Backup failed' });
     } finally {
-      setBusy(false);
+      setBusy(null); setProgressMsg('');
+    }
+  };
+
+  const openRestore = async () => {
+    if (!drive.accessToken) return;
+    setStatus(null); setBusy('restore-list');
+    try {
+      const list = await listBackupFolders(drive.accessToken);
+      setFolders(list);
+      setShowRestore(true);
+    } catch (e: any) {
+      setStatus({ ok: false, msg: e?.message || 'Failed to list backups' });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const doRestore = async (folder: BackupFolder) => {
+    if (!drive.accessToken) return;
+    setShowRestore(false);
+    setStatus(null); setBusy('restore'); setProgressMsg('');
+    try {
+      const result = await restoreFromDrive(drive.accessToken, folder.id, (m) => setProgressMsg(m));
+      setStatus({ ok: true, msg: `Restored ${result.patients} patient${result.patients === 1 ? '' : 's'} & ${result.files} file${result.files === 1 ? '' : 's'} from "${folder.name}"` });
+    } catch (e: any) {
+      setStatus({ ok: false, msg: e?.message || 'Restore failed' });
+    } finally {
+      setBusy(null); setProgressMsg('');
     }
   };
 
@@ -83,7 +95,7 @@ export default function Settings() {
           </View>
         </Section>
 
-        <Section title="Backup" colors={colors}>
+        <Section title="Backup & Restore" colors={colors}>
           <View style={[styles.row, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
             <Ionicons name="cloud-outline" size={20} color={colors.onSurface} />
             <View style={{ flex: 1 }}>
@@ -99,7 +111,7 @@ export default function Settings() {
           <View style={[styles.driveCard, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
             <View style={styles.driveHead}>
               <Ionicons name="logo-google" size={20} color={colors.onSurface} />
-              <Text style={[styles.rowLabel, { color: colors.onSurface }]}>Google Drive Backup</Text>
+              <Text style={[styles.rowLabel, { color: colors.onSurface }]}>Google Drive</Text>
               {drive.connected && (
                 <View style={[styles.badgeOn, { backgroundColor: colors.brand }]}>
                   <Text style={{ color: colors.onBrandPrimary, fontSize: 10, fontWeight: '700' }}>CONNECTED</Text>
@@ -109,7 +121,7 @@ export default function Settings() {
 
             {!configured ? (
               <Text style={{ color: colors.muted, fontSize: 12, marginTop: 8, lineHeight: 18 }}>
-                Add your Google OAuth Client IDs to <Text style={{ fontWeight: '700' }}>frontend/.env</Text> to enable one-tap backup:{"\n"}
+                Add your Google OAuth Client IDs to <Text style={{ fontWeight: '700' }}>frontend/.env</Text> to enable backup & restore:{"\n"}
                 • EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID{"\n"}
                 • EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID{"\n"}
                 • EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
@@ -119,20 +131,20 @@ export default function Settings() {
                 testID="drive-connect-btn"
                 onPress={() => drive.signIn()}
                 disabled={!drive.canSignIn}
-                style={({ pressed }) => [styles.driveBtn, { backgroundColor: colors.brandPrimary, opacity: pressed || !drive.canSignIn ? 0.7 : 1 }]}
+                style={({ pressed }) => [styles.driveBtn, { marginTop: 10, backgroundColor: colors.brandPrimary, opacity: pressed || !drive.canSignIn ? 0.7 : 1 }]}
               >
                 <Ionicons name="log-in-outline" size={16} color={colors.onBrandPrimary} />
                 <Text style={{ color: colors.onBrandPrimary, fontWeight: '700' }}>Connect Google Drive</Text>
               </Pressable>
             ) : (
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <View style={{ gap: 8, marginTop: 10 }}>
                 <Pressable
                   testID="drive-backup-btn"
-                  onPress={backupToDrive}
-                  disabled={busy}
-                  style={({ pressed }) => [styles.driveBtn, { flex: 1, backgroundColor: colors.brandPrimary, opacity: pressed || busy ? 0.75 : 1 }]}
+                  onPress={runBackup}
+                  disabled={!!busy}
+                  style={({ pressed }) => [styles.driveBtn, { backgroundColor: colors.brandPrimary, opacity: pressed || busy ? 0.75 : 1 }]}
                 >
-                  {busy ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
+                  {busy === 'backup' ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
                     <>
                       <Ionicons name="cloud-upload-outline" size={16} color={colors.onBrandPrimary} />
                       <Text style={{ color: colors.onBrandPrimary, fontWeight: '700' }}>Backup Now</Text>
@@ -140,15 +152,34 @@ export default function Settings() {
                   )}
                 </Pressable>
                 <Pressable
+                  testID="drive-restore-btn"
+                  onPress={openRestore}
+                  disabled={!!busy}
+                  style={({ pressed }) => [styles.driveBtn, { backgroundColor: colors.surfaceTertiary, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, opacity: pressed || busy ? 0.75 : 1 }]}
+                >
+                  {busy === 'restore-list' || busy === 'restore' ? <ActivityIndicator color={colors.onSurface} /> : (
+                    <>
+                      <Ionicons name="cloud-download-outline" size={16} color={colors.onSurface} />
+                      <Text style={{ color: colors.onSurface, fontWeight: '700' }}>Restore from Drive</Text>
+                    </>
+                  )}
+                </Pressable>
+                <Pressable
                   testID="drive-signout-btn"
                   onPress={() => drive.signOut()}
-                  style={({ pressed }) => [styles.driveBtn, { backgroundColor: colors.surfaceTertiary, opacity: pressed ? 0.7 : 1, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}
+                  style={({ pressed }) => [styles.driveBtn, { backgroundColor: 'transparent', opacity: pressed ? 0.6 : 1 }]}
                 >
-                  <Text style={{ color: colors.onSurface, fontWeight: '600' }}>Sign out</Text>
+                  <Text style={{ color: colors.muted, fontWeight: '600', fontSize: 13 }}>Sign out of Google</Text>
                 </Pressable>
               </View>
             )}
 
+            {!!progressMsg && (
+              <View style={[styles.statusMsg, { backgroundColor: colors.surfaceTertiary }]}>
+                <ActivityIndicator color={colors.brand} size="small" />
+                <Text style={{ color: colors.onSurface, fontSize: 12, flex: 1 }}>{progressMsg}</Text>
+              </View>
+            )}
             {status && (
               <View style={[styles.statusMsg, { backgroundColor: status.ok ? colors.brandTertiary : (colors.error + '22') }]}>
                 <Ionicons name={status.ok ? 'checkmark-circle' : 'alert-circle'} size={14} color={status.ok ? colors.brand : colors.error} />
@@ -168,6 +199,42 @@ export default function Settings() {
           </View>
         </Section>
       </ScrollView>
+
+      {/* Restore folder picker modal */}
+      <Modal visible={showRestore} transparent animationType="slide" onRequestClose={() => setShowRestore(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHead}>
+              <Text style={[styles.modalTitle, { color: colors.onSurface }]}>Choose Backup to Restore</Text>
+              <Pressable testID="restore-close" onPress={() => setShowRestore(false)}>
+                <Ionicons name="close" size={22} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            {folders && folders.length === 0 && (
+              <Text style={{ color: colors.muted, paddingVertical: spacing.lg, textAlign: 'center' }}>
+                No OrthoVault backups found in your Drive
+              </Text>
+            )}
+            <ScrollView style={{ maxHeight: 400 }}>
+              {folders?.map((f) => (
+                <Pressable
+                  key={f.id}
+                  testID={`restore-folder-${f.id}`}
+                  onPress={() => doRestore(f)}
+                  style={({ pressed }) => [styles.folderRow, { backgroundColor: pressed ? colors.surfaceTertiary : colors.surfaceSecondary, borderColor: colors.border }]}
+                >
+                  <Ionicons name="folder" size={22} color={colors.brand} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.onSurface, fontSize: 14, fontWeight: '600' }} numberOfLines={1}>{f.name}</Text>
+                    {!!f.createdTime && <Text style={{ color: colors.muted, fontSize: 11, marginTop: 2 }}>{new Date(f.createdTime).toLocaleString()}</Text>}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -194,4 +261,9 @@ const styles = StyleSheet.create({
   driveHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   driveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 44, borderRadius: radius.md, paddingHorizontal: 14 },
   statusMsg: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 10, borderRadius: radius.sm },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: spacing.lg },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  modalTitle: { fontSize: 17, fontWeight: '700' },
+  folderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: spacing.md, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, marginBottom: spacing.sm },
 });

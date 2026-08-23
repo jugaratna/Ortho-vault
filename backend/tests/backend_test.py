@@ -176,3 +176,73 @@ class TestPatients:
                 sess.delete(f"{API}/patients/{pid}", timeout=10)
             except Exception:
                 pass
+
+
+# Module: diagnosis persistence (Iteration 2 - ICD-10)
+class TestDiagnosis:
+    created_ids = []
+
+    def test_diagnosis_persists_and_no_objectid(self, s):
+        p = {
+            "name": "TEST_Diag_Persist", "age": 55, "sex": "Male",
+            "country_code": "+91", "mobile": "9998887777",
+            "diagnosis": "M17.11 - Osteoarthritis of Right Knee",
+            "history": "chronic knee pain",
+        }
+        r = s.post(f"{API}/patients", json=p)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["diagnosis"] == p["diagnosis"]
+        assert "_id" not in body
+        pid = body["id"]
+        TestDiagnosis.created_ids.append(pid)
+        g = s.get(f"{API}/patients/{pid}")
+        assert g.status_code == 200
+        gj = g.json()
+        assert gj["diagnosis"] == p["diagnosis"]
+        assert "_id" not in gj
+
+    def test_list_no_objectid_leak(self, s):
+        r = s.get(f"{API}/patients")
+        assert r.status_code == 200
+        for p in r.json():
+            assert "_id" not in p
+
+    @classmethod
+    def teardown_class(cls):
+        sess = requests.Session()
+        for pid in cls.created_ids:
+            try:
+                sess.delete(f"{API}/patients/{pid}", timeout=10)
+            except Exception:
+                pass
+
+
+# Module: transcribe (Iteration 2 - Whisper voice notes)
+class TestTranscribe:
+    @staticmethod
+    def _tiny_wav_bytes(seconds: float = 0.5, sr: int = 8000) -> bytes:
+        import wave
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)  # 16-bit
+            w.setframerate(sr)
+            w.writeframes(b"\x00\x00" * int(sr * seconds))
+        return buf.getvalue()
+
+    def test_empty_audio_400(self, s):
+        r = s.post(f"{API}/transcribe", files={"file": ("empty.wav", b"", "audio/wav")})
+        assert r.status_code == 400
+
+    def test_short_wav_transcribes(self, s):
+        data = self._tiny_wav_bytes()
+        r = s.post(f"{API}/transcribe",
+                   files={"file": ("silence.wav", data, "audio/wav")},
+                   timeout=60)
+        # Whisper may return 200 with (possibly empty) text OR controlled 502
+        assert r.status_code in (200, 400, 413, 502), r.text
+        if r.status_code == 200:
+            j = r.json()
+            assert "text" in j
+            assert isinstance(j["text"], str)

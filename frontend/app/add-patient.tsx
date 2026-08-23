@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import * as Haptics from 'expo-haptics';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { api, fileUrl, MediaFile, Patient, Sex } from '@/src/api/client';
 import { useTheme, spacing, radius } from '@/src/theme';
+import { searchIcd, IcdCode } from '@/src/data/icd10';
+import { ensureMicPermission, transcribeAudio, useAudioRecorder, RecordingPresets } from '@/src/utils/voice';
 
 export default function AddPatient() {
   const router = useRouter();
@@ -45,6 +47,10 @@ export default function AddPatient() {
   const [postOp, setPostOp] = useState<MediaFile[]>([]);
   const [videos, setVideos] = useState<MediaFile[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [icdOptions, setIcdOptions] = useState<IcdCode[]>([]);
+  const [showIcd, setShowIcd] = useState(false);
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'transcribing'>('idle');
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   useEffect(() => {
     if (id) {
@@ -113,6 +119,51 @@ export default function AddPatient() {
     if (section === 'pre_op') setPreOp((c) => c.filter((f) => f.id !== fid));
     else if (section === 'post_op') setPostOp((c) => c.filter((f) => f.id !== fid));
     else setVideos((c) => c.filter((f) => f.id !== fid));
+  };
+
+  const onDiagnosisChange = (t: string) => {
+    setDiagnosis(t);
+    const opts = searchIcd(t, 6);
+    setIcdOptions(opts);
+    setShowIcd(opts.length > 0);
+  };
+
+  const pickIcd = (item: IcdCode) => {
+    const val = `${item.code} - ${item.label}`;
+    setDiagnosis(val);
+    setShowIcd(false);
+    Haptics.selectionAsync();
+  };
+
+  const startVoice = async () => {
+    const ok = await ensureMicPermission();
+    if (!ok) return;
+    try {
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setVoiceState('recording');
+    } catch (e) {
+      setVoiceState('idle');
+    }
+  };
+
+  const stopVoice = async () => {
+    try {
+      setVoiceState('transcribing');
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (!uri) { setVoiceState('idle'); return; }
+      const text = await transcribeAudio(uri);
+      if (text) {
+        setResult((cur) => (cur ? cur.trim() + ' ' : '') + text);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setVoiceState('idle');
+    }
   };
 
   const save = async () => {
@@ -190,7 +241,32 @@ export default function AddPatient() {
 
         <Section title="History & Surgery" colors={colors}>
           <Field label="Diagnosis">
-            <TextInput testID="input-diagnosis" value={diagnosis} onChangeText={setDiagnosis} placeholder="e.g. Osteoarthritis - Left Knee (Grade IV)" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
+            <TextInput
+              testID="input-diagnosis"
+              value={diagnosis}
+              onChangeText={onDiagnosisChange}
+              onFocus={() => setShowIcd(icdOptions.length > 0)}
+              placeholder="Type to search ICD-10 codes (e.g. osteo, ACL, hip)"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}
+            />
+            {showIcd && icdOptions.length > 0 && (
+              <View style={[styles.icdBox, { backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]}>
+                {icdOptions.map((it) => (
+                  <Pressable
+                    key={it.code}
+                    testID={`icd-option-${it.code}`}
+                    onPress={() => pickIcd(it)}
+                    style={({ pressed }) => [styles.icdRow, { borderBottomColor: colors.divider, backgroundColor: pressed ? colors.surfaceTertiary : 'transparent' }]}
+                  >
+                    <View style={[styles.icdCodePill, { backgroundColor: colors.brandTertiary }]}>
+                      <Text style={{ color: colors.onBrandTertiary, fontSize: 11, fontWeight: '700' }}>{it.code}</Text>
+                    </View>
+                    <Text style={{ color: colors.onSurface, fontSize: 13, flex: 1 }} numberOfLines={2}>{it.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </Field>
           <Field label="Chief Complaints / History">
             <TextInput testID="input-history" value={history} onChangeText={setHistory} multiline placeholder="Presenting complaints, examination findings, diagnosis" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
@@ -215,15 +291,36 @@ export default function AddPatient() {
         <MediaSection title="Post-operative Documents" section="post_op" files={postOp} onPickImage={() => pickImages('post_op')} onPickDoc={() => pickDocs('post_op')} onRemove={(fid) => removeFile('post_op', fid)} uploading={uploading === 'post_op'} />
 
         <Section title="Videos" colors={colors}>
-          <Pressable testID="add-video-btn" onPress={pickVideo} style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary }]}>
-            {uploading === 'video' ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="videocam-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Add Video</Text></>}
+          <SubHeading label="Videos" icon="videocam-outline" count={videos.length} />
+          <Pressable testID="add-video-btn" onPress={pickVideo} style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm }]}>
+            {uploading === 'video' ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="videocam-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Add Video (Gait, ROM, Arthroscopy)</Text></>}
           </Pressable>
-          <FileGrid files={videos} onRemove={(fid) => removeFile('video', fid)} />
+          {videos.length > 0 && <FileGrid files={videos} onRemove={(fid) => removeFile('video', fid)} />}
         </Section>
 
         <Section title="Result / Outcome" colors={colors}>
           <Field label="Clinical Result Notes">
-            <TextInput testID="input-result" value={result} onChangeText={setResult} multiline placeholder="ROM, function scores, post-op notes" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border }]} />
+            <View style={{ position: 'relative' }}>
+              <TextInput testID="input-result" value={result} onChangeText={setResult} multiline placeholder="ROM, function scores, post-op notes — or tap the mic to dictate" placeholderTextColor={colors.muted} style={[styles.textarea, { color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderColor: colors.border, paddingRight: 56 }]} />
+              <Pressable
+                testID="voice-note-btn"
+                onPress={voiceState === 'recording' ? stopVoice : startVoice}
+                disabled={voiceState === 'transcribing'}
+                style={[styles.micBtn, { backgroundColor: voiceState === 'recording' ? colors.error : colors.brandPrimary }]}
+              >
+                {voiceState === 'transcribing' ? (
+                  <ActivityIndicator color={colors.onBrandPrimary} size="small" />
+                ) : (
+                  <Ionicons name={voiceState === 'recording' ? 'stop' : 'mic'} size={20} color={colors.onBrandPrimary} />
+                )}
+              </Pressable>
+            </View>
+            {voiceState === 'recording' && (
+              <Text style={{ color: colors.error, fontSize: 12, marginTop: 6, fontWeight: '600' }}>● Recording — tap stop to transcribe</Text>
+            )}
+            {voiceState === 'transcribing' && (
+              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 6 }}>Transcribing…</Text>
+            )}
           </Field>
         </Section>
       </ScrollView>
@@ -259,19 +356,47 @@ function Field({ label, error, flex, children }: any) {
 
 function MediaSection({ title, section, files, onPickImage, onPickDoc, onRemove, uploading }: any) {
   const { colors } = useTheme();
+  const images = (files || []).filter((f: MediaFile) => f.kind === 'image');
+  const docs = (files || []).filter((f: MediaFile) => f.kind === 'pdf' || f.kind === 'doc' || f.kind === 'dicom' || f.kind === 'other');
   return (
     <View style={{ marginBottom: spacing.xl }}>
       <Text style={[styles.sectionTitle, { color: colors.muted }]}>{title.toUpperCase()}</Text>
-      <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
-        <Pressable testID={`${section}-add-image`} onPress={onPickImage} style={[styles.uploadBtn, { flex: 1, borderColor: colors.brand, backgroundColor: colors.brandTertiary }]}>
-          {uploading ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="images-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Images</Text></>}
-        </Pressable>
-        <Pressable testID={`${section}-add-doc`} onPress={onPickDoc} style={[styles.uploadBtn, { flex: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary }]}>
-          <Ionicons name="document-attach-outline" size={18} color={colors.onSurface} />
-          <Text style={{ color: colors.onSurface, fontWeight: '600' }}>PDF / Doc</Text>
-        </Pressable>
+
+      {/* Images sub-section */}
+      <SubHeading label="Images" icon="images-outline" count={images.length} />
+      <Pressable
+        testID={`${section}-add-image`}
+        onPress={onPickImage}
+        style={[styles.uploadBtn, { borderColor: colors.brand, backgroundColor: colors.brandTertiary, marginBottom: spacing.sm }]}
+      >
+        {uploading ? <ActivityIndicator color={colors.brand} /> : <><Ionicons name="images-outline" size={18} color={colors.brand} /><Text style={{ color: colors.onBrandTertiary, fontWeight: '600' }}>Add Images (X-ray, MRI, CT, photos)</Text></>}
+      </Pressable>
+      {images.length > 0 && <FileGrid files={images} onRemove={onRemove} />}
+
+      {/* Documents sub-section */}
+      <SubHeading label="Documents" icon="document-attach-outline" count={docs.length} />
+      <Pressable
+        testID={`${section}-add-doc`}
+        onPress={onPickDoc}
+        style={[styles.uploadBtn, { borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm }]}
+      >
+        <Ionicons name="document-attach-outline" size={18} color={colors.onSurface} />
+        <Text style={{ color: colors.onSurface, fontWeight: '600' }}>Add PDFs / Word Docs / Lab Reports</Text>
+      </Pressable>
+      {docs.length > 0 && <FileGrid files={docs} onRemove={onRemove} />}
+    </View>
+  );
+}
+
+function SubHeading({ label, icon, count }: { label: string; icon: keyof typeof Ionicons.glyphMap; count: number }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.subHead}>
+      <Ionicons name={icon} size={14} color={colors.brand} />
+      <Text style={[styles.subHeadText, { color: colors.onSurface }]}>{label}</Text>
+      <View style={[styles.subCount, { backgroundColor: colors.surfaceTertiary }]}>
+        <Text style={{ color: colors.muted, fontSize: 11, fontWeight: '700' }}>{count}</Text>
       </View>
-      <FileGrid files={files} onRemove={onRemove} />
     </View>
   );
 }
@@ -326,4 +451,11 @@ const styles = StyleSheet.create({
   removeBtn: { position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   footer: { padding: spacing.md, borderTopWidth: StyleSheet.hairlineWidth },
   saveBtn: { height: 52, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center' },
+  icdBox: { marginTop: 6, borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  icdRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  icdCodePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, minWidth: 76, alignItems: 'center' },
+  micBtn: { position: 'absolute', right: 8, bottom: 8, width: 40, height: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  subHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 8 },
+  subHeadText: { fontSize: 13, fontWeight: '700', letterSpacing: 0.2 },
+  subCount: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, minWidth: 22, alignItems: 'center' },
 });

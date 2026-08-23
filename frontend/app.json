@@ -61,7 +61,8 @@
           "faceIDPermission": "Unlock patient records with Face ID"
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

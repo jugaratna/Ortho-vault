@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import io
 import logging
 import uuid
 import requests
@@ -12,6 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, timezone
+from emergentintegrations.llm.openai.speech_to_text import OpenAISpeechToText
 
 
 ROOT_DIR = Path(__file__).parent
@@ -229,6 +231,34 @@ async def get_file(path: str):
         code = e.response.status_code if e.response is not None else 500
         raise HTTPException(status_code=code, detail="Download failed")
     return Response(content=content, media_type=ctype)
+
+
+@api_router.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe short audio recording (voice notes) via Whisper."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio must be 25 MiB or smaller")
+
+    original = file.filename or "recording.m4a"
+    ext = original.rsplit(".", 1)[-1].lower() if "." in original else "m4a"
+    # Whisper supports: mp3 mp4 mpeg mpga m4a wav webm
+    if ext not in {"mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"}:
+        ext = "m4a"
+
+    stt = OpenAISpeechToText(api_key=EMERGENT_KEY)
+    buf = io.BytesIO(data)
+    buf.name = f"voice.{ext}"
+    try:
+        result = await stt.transcribe(file=buf, model="whisper-1", response_format="text")
+        text = str(result).strip() if not hasattr(result, "text") else str(result.text).strip()
+    except Exception as e:
+        logger.warning(f"Transcription failed: {e}")
+        raise HTTPException(status_code=502, detail="Transcription failed")
+
+    return {"text": text}
 
 
 app.include_router(api_router)
