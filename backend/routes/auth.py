@@ -22,28 +22,41 @@ _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _base_sign_in_url(request: Request, invite_email: str = "", invite_role: str = "") -> Optional[str]:
-    """Derive a safe absolute https URL to /login from the request's Origin header.
+    """Derive a safe absolute https URL to /login.
 
-    Optionally appends `?invite=<email>&role=<role>` so the login screen can show a
-    personalized welcome banner (deep-link friendly). Only accepts clean https URLs.
+    Precedence:
+      1. Browser-sent `Origin` / `Referer` header (web)
+      2. Client-sent `X-App-Origin` header (mobile — React Native has no Origin)
+      3. Backend env `APP_PUBLIC_URL`
+    Optionally appends `?invite=<email>&role=<role>` for a personalized deep-link welcome.
     """
-    origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if not origin:
-        return None
-    try:
-        from urllib.parse import urlparse, urlencode
-        p = urlparse(origin.strip())
-        if p.scheme and p.hostname:
-            base = f"{p.scheme}://{p.hostname}"
-            if p.port and p.port not in (80, 443):
-                base += f":{p.port}"
-            candidate = f"{base}/login"
-            if invite_email:
-                qs = urlencode({"invite": invite_email, "role": invite_role or "editor"})
-                candidate = f"{candidate}?{qs}"
-            return _sanitize_url_for_email(candidate)
-    except Exception:
-        return None
+    import os as _os
+    from urllib.parse import urlparse, urlencode
+    candidates = [
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+        request.headers.get("x-app-origin"),
+        _os.environ.get("APP_PUBLIC_URL"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        try:
+            p = urlparse(raw.strip())
+        except Exception:
+            continue
+        if not p.scheme or not p.hostname:
+            continue
+        base = f"{p.scheme}://{p.hostname}"
+        if p.port and p.port not in (80, 443):
+            base += f":{p.port}"
+        candidate = f"{base}/login"
+        if invite_email:
+            qs = urlencode({"invite": invite_email, "role": invite_role or "editor"})
+            candidate = f"{candidate}?{qs}"
+        safe = _sanitize_url_for_email(candidate)
+        if safe:
+            return safe
     return None
 
 

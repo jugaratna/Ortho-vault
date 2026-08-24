@@ -1,7 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import { useEffect, useState } from 'react';
-import { makeRedirectUri, useAuthRequest, ResponseType } from 'expo-auth-session';
+import * as Google from 'expo-auth-session/providers/google';
 import { DRIVE_SCOPE } from './drive';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -11,40 +11,30 @@ const IOS_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
 const ANDROID_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
 
 function isRealClientId(value: string) {
-  // Reject empty and any leftover placeholder like "YOUR_GOOGLE_..._CLIENT_ID.apps.googleusercontent.com"
   if (!value) return false;
   if (value.startsWith('YOUR_')) return false;
   return value.endsWith('.apps.googleusercontent.com');
 }
 
-function currentClientId() {
-  let raw = '';
-  if (Platform.OS === 'web') raw = WEB_ID;
-  else if (Platform.OS === 'ios') raw = IOS_ID;
-  else raw = ANDROID_ID;
-  return isRealClientId(raw) ? raw : '';
+function currentPlatformConfigured() {
+  if (Platform.OS === 'web') return isRealClientId(WEB_ID);
+  if (Platform.OS === 'ios') return isRealClientId(IOS_ID);
+  return isRealClientId(ANDROID_ID);
 }
 
 export function isDriveConfigured() {
-  return !!currentClientId();
+  return currentPlatformConfigured();
 }
 
 export function useGoogleDriveAuth() {
-  const clientId = currentClientId();
-  const redirectUri = makeRedirectUri({ scheme: 'frontend', path: 'oauthredirect' });
-
-  const [request, response, promptAsync] = useAuthRequest(
-    {
-      clientId: clientId || 'not-configured',
-      responseType: ResponseType.Token,
-      scopes: ['openid', 'email', DRIVE_SCOPE],
-      redirectUri,
-    },
-    {
-      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-      tokenEndpoint: 'https://oauth2.googleapis.com/token',
-    },
-  );
+  // Expo's Google provider handles PKCE, native URL schemes, and web redirects correctly per-platform.
+  // It uses the reversed-client-id URL scheme on iOS, the Play Services flow on Android, and the auth session on web.
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    webClientId: isRealClientId(WEB_ID) ? WEB_ID : undefined,
+    iosClientId: isRealClientId(IOS_ID) ? IOS_ID : undefined,
+    androidClientId: isRealClientId(ANDROID_ID) ? ANDROID_ID : undefined,
+    scopes: ['openid', 'email', 'profile', DRIVE_SCOPE],
+  });
 
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
@@ -56,10 +46,10 @@ export function useGoogleDriveAuth() {
   }, [response]);
 
   return {
-    configured: !!clientId,
+    configured: currentPlatformConfigured(),
     accessToken,
     connected: !!accessToken,
-    canSignIn: !!request && !!clientId,
+    canSignIn: !!request && currentPlatformConfigured(),
     signIn: () => promptAsync(),
     signOut: () => setAccessToken(null),
   };

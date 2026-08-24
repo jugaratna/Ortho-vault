@@ -72,7 +72,11 @@ export function fileUrl(storagePath: string) {
 
 function authHeaders(): Record<string, string> {
   const t = getAuthToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+  const headers: Record<string, string> = t ? { Authorization: `Bearer ${t}` } : {};
+  // Tell the backend our own public origin so it can build safe invite/share links
+  // (React Native's fetch never sends the browser-only `Origin` header).
+  if (BACKEND_URL) headers['X-App-Origin'] = BACKEND_URL;
+  return headers;
 }
 
 async function json<T>(res: Response): Promise<T> {
