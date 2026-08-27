@@ -1,0 +1,11 @@
+{
+  "name": "OrthoVault",
+  "description": "HIPAA-mindful clinical records, surgery notes, pre/post-op X-ray comparison slider, and video management for orthopedic surgeons.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
